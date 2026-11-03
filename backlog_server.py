@@ -17,7 +17,10 @@ Standard library only. Serves:
 Notes and order live in notes.json and order.json next to triage.json.
 
 Every response carries X-Backlog-Server: 1 and X-Backlog-Api: 2 (the API version). GET
-/api/library sends an ETag and honors If-None-Match, answering 304 when it still matches.
+/api/library, /api/triage, /api/notes and /api/order send an ETag and honor If-None-Match,
+answering 304 when it still matches. Their PUTs honor an optional If-Match (412 if the
+resource changed since that ETag) and return the previous value; with no If-Match they
+behave as they always did.
 
 There is no authentication. Bind it to your LAN or a VPN, or put it behind an
 authenticating proxy (for example Cloudflare Access); don't expose it directly.
@@ -74,6 +77,11 @@ def atomic_write(path: str, data: bytes) -> None:
         except OSError:
             pass
         raise
+
+
+def dump(obj) -> bytes:
+    """The JSON bytes the API sends. ETags are computed over exactly these."""
+    return json.dumps(obj).encode()
 
 
 def etag_of(body: bytes) -> str:
@@ -190,8 +198,29 @@ def make_handler(app: App):
             if self.command != "HEAD" and status != 304:
                 self.wfile.write(body)
 
-        def json(self, status: int, obj) -> None:
-            self.send(status, json.dumps(obj).encode())
+        def json(self, status: int, obj, headers: dict[str, str] | None = None) -> None:
+            self.send(status, dump(obj), headers=headers)
+
+        def small_resource(self, read) -> None:
+            """GET for triage, notes and order: ETag over the body about to be sent, read under
+            the same lock the writers take, so the tag and the body can't disagree."""
+            with app.lock:
+                body = dump(read())
+            etag = etag_of(body)
+            if none_match(self.headers.get("If-None-Match"), etag):
+                return self.send(304, headers={"ETag": etag})
+            self.send(200, body, headers={"ETag": etag})
+
+        def if_match_ok(self, current: str) -> bool:
+            """No If-Match header: always fine (today's behavior). Otherwise strong comparison
+            against the resource's current ETag; `*` matches, and a W/ tag never does."""
+            header = self.headers.get("If-Match")
+            if header is None:
+                return True
+            return any(tok == "*" or tok == current for tok in ETAG_TOKEN.findall(header))
+
+        def precondition_failed(self, current: str) -> None:
+            self.json(412, {"error": "precondition failed", "etag": current}, headers={"ETag": current})
 
         def body(self):
             n = int(self.headers.get("Content-Length") or 0)
@@ -217,14 +246,11 @@ def make_handler(app: App):
                 except FileNotFoundError:
                     return self.json(404, {"error": "no export yet"})
             if path == "/api/triage":
-                with app.lock:
-                    return self.json(200, app.read_triage())
+                return self.small_resource(app.read_triage)
             if path == "/api/notes":
-                with app.lock:
-                    return self.json(200, app.read_notes())
+                return self.small_resource(app.read_notes)
             if path == "/api/order":
-                with app.lock:
-                    return self.json(200, app.read_order())
+                return self.small_resource(app.read_order)
             if path == "/healthz":
                 return self.send(200, b"ok", "text/plain")
             self.json(404, {"error": "not found"})
@@ -238,17 +264,27 @@ def make_handler(app: App):
             except (ValueError, json.JSONDecodeError) as e:
                 return self.json(400, {"error": str(e)})
             if path == "/api/triage":
+                if not isinstance(data, dict):
+                    return self.json(400, {"error": "expected a JSON object"})
                 appid, lane = data.get("appid"), data.get("lane", "")
-                if not isinstance(appid, int) or lane not in LANES:
+                if not is_app_id(appid) or not isinstance(lane, str) or lane not in LANES:
                     return self.json(400, {"error": "expected {appid: int, lane: next|someday|skip|done|''}"})
                 with app.lock:
                     t = app.read_triage()
-                    if lane:
-                        t[str(appid)] = lane
-                    else:
-                        t.pop(str(appid), None)
-                    atomic_write(app.triage, json.dumps(t, separators=(",", ":")).encode())
-                return self.json(200, {"ok": True})
+                    current = etag_of(dump(t))
+                    stale = not self.if_match_ok(current)
+                    if not stale:
+                        previous = t.get(str(appid), "")
+                        if lane:
+                            t[str(appid)] = lane
+                        else:
+                            t.pop(str(appid), None)
+                        atomic_write(app.triage, json.dumps(t, separators=(",", ":")).encode())
+                        new_etag = etag_of(dump(t))
+                if stale:
+                    return self.precondition_failed(current)
+                return self.json(200, {"ok": True, "appid": appid, "lane": lane, "previous": previous},
+                                 headers={"ETag": new_etag})
             if path == "/api/notes":
                 if not isinstance(data, dict):
                     return self.json(400, {"error": "expected a JSON object"})
@@ -260,12 +296,21 @@ def make_handler(app: App):
                     return self.json(400, {"error": f"notes are limited to {NOTE_MAX} characters"})
                 with app.lock:
                     n = app.read_notes()
-                    if note:
-                        n[str(appid)] = note
-                    else:
-                        n.pop(str(appid), None)
-                    atomic_write(app.notes, json.dumps(n, ensure_ascii=False, separators=(",", ":")).encode())
-                return self.json(200, {"ok": True})
+                    current = etag_of(dump(n))
+                    stale = not self.if_match_ok(current)
+                    if not stale:
+                        previous = n.get(str(appid), "")
+                        if note:
+                            n[str(appid)] = note
+                        else:
+                            n.pop(str(appid), None)
+                        atomic_write(app.notes, json.dumps(n, ensure_ascii=False, separators=(",", ":")).encode())
+                        new_etag = etag_of(dump(n))
+                if stale:
+                    return self.precondition_failed(current)
+                # `note` is the text actually stored (stripped), which can differ from what was sent.
+                return self.json(200, {"ok": True, "appid": appid, "note": note, "previous": previous},
+                                 headers={"ETag": new_etag})
             if path == "/api/order":
                 order = data.get("order") if isinstance(data, dict) else None
                 if not isinstance(order, list) or len(order) > ORDER_MAX or not all(is_app_id(a) for a in order):
@@ -276,8 +321,16 @@ def make_handler(app: App):
                         seen.add(a)
                         clean.append(a)
                 with app.lock:
-                    atomic_write(app.order, json.dumps(clean, separators=(",", ":")).encode())
-                return self.json(200, {"ok": True, "count": len(clean)})
+                    previous = app.read_order()
+                    current = etag_of(dump(previous))
+                    stale = not self.if_match_ok(current)
+                    if not stale:
+                        atomic_write(app.order, json.dumps(clean, separators=(",", ":")).encode())
+                        new_etag = etag_of(dump(clean))
+                if stale:
+                    return self.precondition_failed(current)
+                return self.json(200, {"ok": True, "count": len(clean), "order": clean, "previous": previous},
+                                 headers={"ETag": new_etag})
             if path == "/api/library":
                 games = data.get("games") if isinstance(data, dict) else None
                 if not isinstance(games, list) or not all(isinstance(g, dict) and "appid" in g for g in games):
