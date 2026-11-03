@@ -7,6 +7,15 @@
 #
 # Writes ~/exports/steam_backlog.json, which backlog_server.py serves to the dashboard.
 # Meant for cron or a systemd timer; logs go to stdout/stderr.
+#
+# One export runs at a time, whoever starts it (cron, a timer, the dashboard's Refresh library
+# button, a shell). The run holds an exclusive lock on $EXPORT_DIR/.export.lock until it exits.
+#
+# Exit status (sysexits):
+#   0   the export finished (including "Interrupted; writing what's done so far")
+#   75  another export is already running (the lock is held)
+#   78  STEAM_API_KEY or STEAM_PROFILE isn't set
+#   *   the exporter failed
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -18,7 +27,7 @@ PY="$HERE/venv/bin/python"
 [ -f "$ENVF" ] && . "$ENVF"
 if [ -z "${STEAM_API_KEY:-}" ] || [ -z "${STEAM_PROFILE:-}" ]; then
   echo "$(date '+%F %T') skipped: set STEAM_API_KEY and STEAM_PROFILE in $ENVF"
-  exit 0
+  exit 78
 fi
 case "$STEAM_PROFILE" in
   [0-9]*) WHO="--steamid $STEAM_PROFILE" ;;
@@ -27,6 +36,20 @@ esac
 
 mkdir -p "$OUT"
 cd "$OUT"
+# Take the lock on fd 9 and keep it: the shell leaves fd 9 open across the exec below, so the
+# exporter itself holds the lock until it exits. flock is a BusyBox applet on Alpine and part of
+# util-linux elsewhere; both use flock(2), as does the dashboard server when it checks.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$OUT/.export.lock"
+  if ! flock -n 9; then
+    echo "$(date '+%F %T') skipped: another export is running"
+    exit 75
+  fi
+else
+  # Without flock every run would look "busy" and the weekly export would never happen, so run
+  # unlocked and say so.
+  echo "$(date '+%F %T') warning: flock not found; not guarding against concurrent exports"
+fi
 echo "$(date '+%F %T') starting export"
 export STEAM_API_KEY
 # shellcheck disable=SC2086
