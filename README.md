@@ -24,6 +24,7 @@ Everything is standard-library Python, plus the optional [`howlongtobeatpy`](htt
 | `steam_backlog_export.py` | Exports your library to `steam_backlog.json`, caching lookups so later runs are fast |
 | `backlog_server.py` | Serves the dashboard and its small JSON API |
 | `backlog.html` | The dashboard page |
+| `SCORING.md` | How the couch score is computed (the spec other tools implement) |
 | `run-export.sh` | Wrapper for cron/systemd and the dashboard's **Refresh library** button; reads your keys from `~/.steam-env` and takes the export lock |
 | `install/alpine.sh` | Installer for Alpine Linux (OpenRC); works well in a small Proxmox LXC |
 | `contrib/systemd/` | Service and timer units for systemd hosts |
