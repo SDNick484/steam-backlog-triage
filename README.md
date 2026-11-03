@@ -6,6 +6,7 @@ An exporter pulls your Steam library and enriches every game with:
 - **Steam Deck compatibility**: Valve's Verified / Playable / Unsupported rating
 - **HowLongToBeat times**: main story and main + extras
 - **Store details** (optional): genres, Metacritic score, release year, controller support
+- **ProtonDB**: the community compatibility tier (Native to Borked, or Pending) and how many reports it's based on
 
 The dashboard then shows:
 - **Library overview:** how much of your library you've played, and a grid of unplayed games by Deck rating and length. Click a cell to filter.
@@ -43,6 +44,7 @@ python3 backlog_server.py --data ~/exports   # then open http://localhost:8484/
 
 The first export takes a while for a big library:
 - **Store details** (`--details`): Steam allows about 200 lookups per 5 minutes, so roughly 50 minutes per 1,800 games.
+- **ProtonDB**: about 0.3 s per game, cached for 7 days, so a first run for 1,800 games takes about 9 minutes.
 - **HowLongToBeat:** about half a second per game.
 
 Results are cached in `steam_backlog_cache.json`. Later runs only fetch games that are new or whose cached entries have expired. `--limit 20` is handy for a quick test.
@@ -107,6 +109,7 @@ The server has no login.
 
 - Steam Web API: library and playtime.
 - Steam store: Steam Deck compatibility and store details.
+- ProtonDB: community Proton compatibility summaries. This is an unofficial endpoint, so missing or unexpected data is shown as unknown.
 - HowLongToBeat, through `howlongtobeatpy`, which uses an unofficial API that can change. If it breaks, exports still complete without length times.
 
 This project isn't affiliated with Valve, HowLongToBeat or any store.
