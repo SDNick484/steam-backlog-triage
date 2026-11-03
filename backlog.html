@@ -183,6 +183,7 @@ input::placeholder{color:var(--muted)}
 .g-play{font-size:13.5px;display:flex;flex-direction:column;gap:1px}
 .g-play small{font-size:12px;color:var(--muted)}
 .g-len{font-size:13.5px}
+.g-rev{display:block;font-size:12px;color:var(--muted);margin-top:3px;font-weight:500}
 .g-len .lenbar{gap:3px}
 .empty{padding:28px 16px;text-align:center;color:var(--muted)}
 .more{display:flex;justify-content:center;padding:12px;border-top:1px solid var(--line)}
@@ -259,7 +260,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     <div class="section-head">
       <div style="display:flex;flex-direction:column;gap:4px">
         <h2 id="picksH">Couch picks</h2>
-        <p class="sub">The six best backlog candidates for the Deck, ranked by: never or barely played, Deck Verified or Playable, shorter HowLongToBeat time, higher Metacritic. Games you mark <b>Next</b> come first.</p>
+        <p class="sub">The six best backlog candidates for the Deck, ranked by: never or barely played, Deck Verified or Playable, shorter HowLongToBeat time, higher Metacritic and Steam reviews. Games you mark <b>Next</b> come first.</p>
       </div>
     </div>
     <div class="picks" id="picks"></div>
@@ -440,6 +441,13 @@ try { const saved = JSON.parse(localStorage.getItem("bt-filters") || "null"); if
 function saveFilters() { try { localStorage.setItem("bt-filters", JSON.stringify({ ...S.f, q: "" })); } catch (e) {} }
 
 // ---------------------------------------------------------------- data helpers
+// Sample Steam review summaries: appid -> [percent positive, review count, category]
+const SAMPLE_REVIEWS = {
+  620: [98, 280000, "Overwhelmingly Positive"], 1145360: [97, 120000, "Overwhelmingly Positive"],
+  413150: [98, 510000, "Overwhelmingly Positive"], 504230: [98, 95000, "Overwhelmingly Positive"],
+  1794680: [93, 150000, "Overwhelmingly Positive"], 546560: [96, 90000, "Overwhelmingly Positive"],
+  870780: [89, 35000, "Very Positive"], 1174180: [96, 120000, "Overwhelmingly Positive"],
+};
 function sampleGames() {
   const now = Date.now() / 1000;
   return SAMPLE.map(([appid, name, pt, dpt, days, deck, h, genres, mc, year]) => ({
@@ -447,6 +455,7 @@ function sampleGames() {
     lastPlayed: days ? Math.round(now - days * 86400) : 0,
     deck, hltb: h ? { main: h[0], extra: h[1], complete: h[2] } : null,
     genres, metacritic: mc, year, controller: null,
+    reviews: SAMPLE_REVIEWS[appid] ? { pct: SAMPLE_REVIEWS[appid][0], total: SAMPLE_REVIEWS[appid][1], category: SAMPLE_REVIEWS[appid][2] } : null,
   }));
 }
 function normalize(g) {
@@ -464,6 +473,7 @@ function normalize(g) {
     metacritic: n(g.metacritic),
     year: n(g.year),
     controller: g.controller === "full" || g.controller === "partial" ? g.controller : null,
+    reviews: g.reviews && n(g.reviews.total) !== null ? { pct: n(g.reviews.pct), total: n(g.reviews.total), category: typeof g.reviews.category === "string" ? g.reviews.category : null } : null,
   };
 }
 const playState = (g) => (g.playtime === 0 ? "never" : g.playtime < TRIED_MIN ? "tried" : "played");
@@ -486,6 +496,7 @@ function score(g) {
   const h = mainH(g);
   if (h) s += h <= 5 ? 24 : h <= 12 ? 18 : h <= 25 ? 9 : h <= 50 ? 0 : -10;
   if (g.metacritic) s += (g.metacritic - 75) / 2;
+  if (g.reviews && g.reviews.total >= 20) s += (g.reviews.pct - 75) / 4;
   if (g.deckPlaytime > 0) s += 5;
   if (g.controller === "full") s += 4;
   if (lane(g) === "next") s += 100;
@@ -508,6 +519,12 @@ function ago(ts) {
   if (d < 365) return `${Math.round(d / 30)} mo ago`;
   return `${(d / 365).toFixed(d < 3650 ? 1 : 0).replace(/\.0$/, "")} yr ago`;
 }
+function revLine(g) {
+  if (!g.reviews) return "";
+  if (!g.reviews.total) return `<small class="g-rev">No reviews</small>`;
+  if (g.reviews.pct === null) return "";
+  return `<small class="g-rev num" title="${esc(g.reviews.category || "")}">${g.reviews.pct}% · ${g.reviews.total.toLocaleString()} reviews</small>`;
+}
 function deckBadge(d) { return `<span class="deck d${d}"><i aria-hidden="true">${DECK[d].icon}</i>${DECK[d].label}</span>`; }
 function lenBar(g, maxH = 60) {
   const h = g.hltb;
@@ -529,6 +546,7 @@ function reasons(g) {
   out.push([st === "never" ? "Never launched" : st === "tried" ? `Tried for ${fmtMin(g.playtime)}` : `${fmtMin(g.playtime)} played`, false]);
   if (g.deckPlaytime > 0) out.push(["Played on Deck", false]);
   if (g.metacritic >= 85) out.push([`Metacritic ${g.metacritic}`, false]);
+  if (g.reviews && g.reviews.total >= 50 && g.reviews.pct >= 90) out.push([`${g.reviews.pct}% positive on Steam`, false]);
   if (g.controller === "full") out.push(["Full controller support", false]);
   return out;
 }
@@ -686,7 +704,7 @@ function renderList() {
     return `<div class="row">
       <div class="g-name"><a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" rel="noopener">${esc(g.name)}</a>${meta ? `<span class="g-meta">${esc(meta)}</span>` : ""}</div>
       <div class="g-play num">${fmtMin(g.playtime)}${g.deckPlaytime ? `<small>${fmtMin(g.deckPlaytime)} on Deck</small>` : ""}${la && g.playtime ? `<small>${la}</small>` : ""}</div>
-      <div class="g-deck">${deckBadge(g.deck)}</div>
+      <div class="g-deck">${deckBadge(g.deck)}${revLine(g)}</div>
       <div class="g-len">${lenBar(g)}</div>
       <div class="g-lanes">${laneButtons(g, false)}</div>
     </div>`;
