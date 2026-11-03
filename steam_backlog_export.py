@@ -7,6 +7,7 @@ What it collects for every game you own:
   * Steam Deck compatibility: Verified / Playable / Unsupported     (Steam store)
   * HowLongToBeat main / main+extra / completionist hours           (optional, howlongtobeatpy)
   * genres, Metacritic score, release year, controller support     (optional, --details)
+  * Steam user reviews: percent positive, review count, category  (Steam store, no key)
 
 Everything it looks up is cached in steam_backlog_cache.json, so the first run is the
 slow one and later runs only fetch games that are new or whose cache entry has expired.
@@ -42,7 +43,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Overridable so the script can be tested against a local mock server.
 API_BASE = os.environ.get("STEAM_API_BASE", "https://api.steampowered.com")
@@ -54,6 +55,10 @@ USER_AGENT = "steam-backlog-export/1.0 (+personal use)"
 TTL_DECK = 21
 TTL_HLTB = 90
 TTL_DETAILS = 90
+TTL_REVIEWS = 30
+
+# Every cache kind the exporter keeps. Loading ignores kinds not listed here.
+CACHE_KINDS = ("deck", "hltb", "details", "reviews")
 
 DECK_LABELS = {0: "Unknown", 1: "Unsupported", 2: "Playable", 3: "Verified"}
 
@@ -184,6 +189,29 @@ def fetch_deck_category(appid: int, limiter: RateLimiter) -> int | None:
     return int(cat) if isinstance(cat, int) and cat in DECK_LABELS else 0
 
 
+def fetch_reviews(appid: int, limiter: RateLimiter) -> dict | None:
+    """Steam user-review summary. Returns {'pct','total','category'}; None on network trouble.
+
+    The appreviews endpoint is undocumented. This reads the `query_summary` block and
+    tolerates missing keys (they come back as unknown, never as an error).
+    """
+    q = urllib.parse.urlencode({"json": 1, "num_per_page": 0})
+    data = http_json(f"{STORE_BASE}/appreviews/{appid}?{q}", limiter)
+    if data is None:
+        return None  # network trouble: don't cache, try again next run
+    summary = data.get("query_summary") or {}
+    positive = summary.get("total_positive")
+    total = summary.get("total_reviews")
+    if not isinstance(total, int) or total <= 0 or not isinstance(positive, int):
+        return {"pct": None, "total": 0, "category": None}
+    category = summary.get("review_score_desc")
+    return {
+        "pct": round(100 * positive / total),
+        "total": total,
+        "category": category if isinstance(category, str) and category else None,
+    }
+
+
 def fetch_details(appid: int, limiter: RateLimiter) -> dict | None:
     q = urllib.parse.urlencode({"appids": appid, "l": "english", "cc": "us"})
     data = http_json(f"{STORE_BASE}/api/appdetails?{q}", limiter)
@@ -259,7 +287,7 @@ def fetch_hltb(hltb, name: str) -> dict | None:
 class Cache:
     def __init__(self, path: str, refresh: bool):
         self.path = path
-        self.data: dict = {"deck": {}, "hltb": {}, "details": {}}
+        self.data: dict = {k: {} for k in CACHE_KINDS}
         self._lock = threading.Lock()
         self._dirty = 0
         if os.path.exists(path) and not refresh:
@@ -372,6 +400,19 @@ def main() -> None:
                 log(f"  (about {len(todo) * 1.6 / 60:.0f} minutes for store details)")
             run_parallel("Store details", todo, do_details, workers=2)
 
+        # Steam reviews: paced at about one request per second, cached for TTL_REVIEWS days.
+        reviews_limiter = RateLimiter(1.0)
+
+        def do_reviews(appid: int) -> None:
+            rv = fetch_reviews(appid, reviews_limiter)
+            if rv is not None:
+                cache.put("reviews", appid, rv)
+
+        todo = [a for a in appids if cache.get("reviews", a, TTL_REVIEWS) is None]
+        if todo:
+            log(f"  (about {len(todo) / 60:.0f} minutes for Steam review scores)")
+        run_parallel("Steam reviews", todo, do_reviews, workers=2)
+
         # HowLongToBeat: one at a time with a pause, to be a polite guest.
         if not args.skip_hltb:
             try:
@@ -409,6 +450,7 @@ def main() -> None:
         deck = cache.get("deck", a, 10**6)
         hl = cache.get("hltb", a, 10**6)
         det = cache.get("details", a, 10**6)
+        rev = cache.get("reviews", a, 10**6)
         hv = hl["v"] if hl else None
         games.append({
             "appid": a,
@@ -422,6 +464,7 @@ def main() -> None:
             "metacritic": det["v"].get("metacritic") if det else None,
             "year": det["v"].get("year") if det else None,
             "controller": det["v"].get("controller") if det else None,
+            "reviews": rev["v"] if rev else None,
         })
 
     out = {
