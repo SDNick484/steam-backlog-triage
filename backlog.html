@@ -196,6 +196,22 @@ input::placeholder{color:var(--muted)}
 .g-rev.proton.t-platinum,.g-rev.proton.t-native{color:var(--good-ink)}
 .g-rev.proton.t-gold{color:var(--warn-ink)}
 .g-rev.proton.t-borked{color:var(--crit-ink)}
+.fpanel{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.fpanel>summary{cursor:pointer;list-style:none;padding:12px 16px;font-weight:600;display:flex;align-items:center;gap:8px}
+.fpanel>summary::-webkit-details-marker{display:none}
+.fpanel>summary::before{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .15s}
+.fpanel[open]>summary::before{transform:rotate(45deg)}
+.fcount{font-size:12px;font-weight:600;color:var(--accent-ink)}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px;padding:0 16px 16px}
+.fgroup{display:flex;flex-direction:column;gap:8px;min-width:0}
+.fhead{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-2)}
+.unk{font-size:12px;font-weight:500;color:var(--muted);display:inline-flex;gap:5px;align-items:center;white-space:nowrap}
+.fgroup .seg button{font-size:12px;padding:4px 9px}
+.frow{display:flex;gap:8px;flex-wrap:wrap}
+.frow label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);flex:1 1 110px;min-width:0}
+.fgroup select,.frow input[type=number]{width:100%;background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;padding:7px 9px;font-size:14px;color:var(--ink);min-width:0}
+.radio{display:flex;gap:12px;font-size:13px;color:var(--ink-2)}
+.fhint{font-size:12px;color:var(--muted)}
 .g-len .lenbar{gap:3px}
 .empty{padding:28px 16px;text-align:center;color:var(--muted)}
 .more{display:flex;justify-content:center;padding:12px;border-top:1px solid var(--line)}
@@ -317,17 +333,6 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
         </select>
       </div>
       <div class="field">
-        <label for="len">Length</label>
-        <select id="len">
-          <option value="">Any length</option>
-          <option value="short">Under 5h</option>
-          <option value="mid">5–15h</option>
-          <option value="long">15–40h</option>
-          <option value="epic">40h+</option>
-          <option value="none">No HLTB data</option>
-        </select>
-      </div>
-      <div class="field">
         <label for="sort">Sort</label>
         <select id="sort">
           <option value="score">Couch score</option>
@@ -338,12 +343,12 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
           <option value="mc">Metacritic</option>
         </select>
       </div>
-      <div class="field">
-        <span class="eyebrow" style="font-size:12px;letter-spacing:0;text-transform:none;font-weight:600">Deck rating</span>
-        <div class="seg" id="deckSeg" role="group" aria-label="Deck rating"></div>
-      </div>
     </div>
-    <div class="count-line"><span id="countLine"></span><button class="linkish" type="button" id="clearBtn">Clear filters</button></div>
+    <details class="fpanel" id="fpanel">
+      <summary>Filters <span class="fcount" id="fcount"></span></summary>
+      <div class="fgrid" id="fbody"></div>
+    </details>
+    <div class="count-line"><span id="countLine"></span><button class="linkish" type="button" id="clearBtn">Clear all</button></div>
     <div class="list" id="list"></div>
   </section>
 
@@ -449,13 +454,129 @@ const S = {
   noteDraft: new Map(),      // unsaved note text, kept across re-renders
   focusNote: null,
   shown: PAGE,
-  f: { q: "", view: "backlog", len: "", sort: "score", deck: [] },
+  f: null,                   // filter state, set below
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 
-try { const saved = JSON.parse(localStorage.getItem("bt-filters") || "null"); if (saved) Object.assign(S.f, saved, { q: "" }); } catch (e) {}
+// ---------------------------------------------------------------- filter state
+// Flat filter state. Arrays are multi-select. "*Unk" flags mean "include games with no data".
+// The state is mirrored in the URL hash, so a filtered view can be bookmarked.
+const TIERS = ["native", "platinum", "gold", "silver", "bronze", "borked", "pending"];
+const CTRLS = ["full", "partial", "none"];
+const PLAYS = ["never", "tried", "played"];
+const LANE_F = ["none", "next", "someday", "skip", "done"];
+const SRCS = ["main", "extra", "complete"];
+const VIEWS = ["backlog", "next", "someday", "played", "closed", "all"];
+const SORTS = ["score", "short", "name", "recent", "most", "mc"];
+const MC_OPTS = [60, 70, 75, 80, 85, 90];
+const DEFAULT_F = {
+  q: "", view: "backlog", sort: "score",
+  deck: [], gen: [], genUnk: false, gm: "any",
+  dsrc: "main", dmin: null, dmax: null, dnone: false, durUnk: false,
+  pt: [], ptUnk: false,
+  mc: null, mcUnk: false,
+  ymin: null, ymax: null, yrUnk: false,
+  ctrl: [], ctrlUnk: false,
+  play: [], lane: [], notes: "",
+};
+const numIn = (v, lo, hi) => {
+  if (v === null || v === undefined || v === "") return null;
+  const x = Number(v);
+  return Number.isFinite(x) && x >= lo && x <= hi ? x : null;
+};
+const pickIn = (v, allowed) => (Array.isArray(v) ? [...new Set(v.map(String))].filter((x) => allowed.includes(x)) : []);
+// Validate any raw object (from the URL, localStorage or a control) into a complete filter state.
+function clean(raw) {
+  const o = raw || {};
+  const r = JSON.parse(JSON.stringify(DEFAULT_F));
+  if (typeof o.q === "string") r.q = o.q.slice(0, 200);
+  if (VIEWS.includes(o.view)) r.view = o.view;
+  if (SORTS.includes(o.sort)) r.sort = o.sort;
+  r.deck = pickIn(o.deck, ["0", "1", "2", "3"]).map(Number);
+  r.gen = Array.isArray(o.gen) ? [...new Set(o.gen.map(String))].filter((x) => x && x.length <= 60).slice(0, 20) : [];
+  r.genUnk = o.genUnk === true;
+  r.gm = o.gm === "all" ? "all" : "any";
+  r.dsrc = SRCS.includes(o.dsrc) ? o.dsrc : "main";
+  r.dmin = numIn(o.dmin, 0, 1000);
+  r.dmax = numIn(o.dmax, 0, 1000);
+  r.dnone = o.dnone === true;
+  r.durUnk = o.durUnk === true;
+  r.pt = pickIn(o.pt, TIERS);
+  r.ptUnk = o.ptUnk === true;
+  const mc = Number(o.mc);
+  r.mc = MC_OPTS.includes(mc) ? mc : null;
+  r.mcUnk = o.mcUnk === true;
+  r.ymin = numIn(o.ymin, 1950, 2100);
+  r.ymax = numIn(o.ymax, 1950, 2100);
+  r.yrUnk = o.yrUnk === true;
+  r.ctrl = pickIn(o.ctrl, CTRLS);
+  r.ctrlUnk = o.ctrlUnk === true;
+  r.play = pickIn(o.play, PLAYS);
+  r.lane = pickIn(o.lane, LANE_F);
+  r.notes = ["yes", "no"].includes(o.notes) ? o.notes : "";
+  return r;
+}
+function paramsToRaw(p) {
+  const o = {};
+  for (const k of Object.keys(DEFAULT_F)) {
+    const d = DEFAULT_F[k];
+    if (Array.isArray(d)) o[k] = p.getAll(k);
+    else if (typeof d === "boolean") o[k] = p.get(k) === "1";
+    else o[k] = p.get(k);
+  }
+  return o;
+}
+function filtersToParams(f) {
+  const p = new URLSearchParams();
+  for (const k of Object.keys(DEFAULT_F)) {
+    const v = f[k], d = DEFAULT_F[k];
+    if (Array.isArray(v)) v.forEach((x) => p.append(k, String(x)));
+    else if (typeof d === "boolean") { if (v) p.set(k, "1"); }
+    else if (v !== null && v !== undefined && v !== "" && v !== d) p.set(k, String(v));
+  }
+  return p;
+}
+function loadInitialFilters() {
+  try { if (location.hash.length > 1) return clean(paramsToRaw(new URLSearchParams(location.hash.slice(1)))); } catch (e) {}
+  try { return clean(JSON.parse(localStorage.getItem("bt-filters") || "null") || {}); } catch (e) { return clean({}); }
+}
 function saveFilters() { try { localStorage.setItem("bt-filters", JSON.stringify({ ...S.f, q: "" })); } catch (e) {} }
+function writeHash() {
+  const s = filtersToParams(S.f).toString();
+  try { history.replaceState(null, "", s ? "#" + s : location.pathname + location.search); } catch (e) {}
+}
+S.f = loadInitialFilters();
+window.addEventListener("hashchange", () => {
+  S.f = loadInitialFilters();
+  render();
+});
+
+// Duration presets. These match the heatmap buckets (values are rounded to 0.1 h).
+const DUR_PRESET = {
+  short: { dmin: null, dmax: 4.9 }, mid: { dmin: 5, dmax: 14.9 },
+  long: { dmin: 15, dmax: 39.9 }, epic: { dmin: 40, dmax: null },
+};
+function durFields(k) {
+  if (k === "none") return { dsrc: "main", dmin: null, dmax: null, dnone: true };
+  return { dsrc: "main", dnone: false, ...(DUR_PRESET[k] || { dmin: null, dmax: null }) };
+}
+function durKey(f) {
+  if (f.dnone) return "none";
+  if (f.dsrc !== "main") return null;
+  const k = `${f.dmin}|${f.dmax}`;
+  return { "null|4.9": "short", "5|14.9": "mid", "15|39.9": "long", "40|null": "epic" }[k] || null;
+}
+function activeCount() {
+  const f = S.f;
+  return [
+    f.q.trim() !== "", f.deck.length > 0, f.gen.length > 0,
+    f.dnone || f.dmin !== null || f.dmax !== null, f.pt.length > 0,
+    f.mc !== null, f.ymin !== null || f.ymax !== null, f.ctrl.length > 0,
+    f.play.length > 0, f.lane.length > 0, f.notes !== "",
+  ].filter(Boolean).length;
+}
+function apply() { S.shown = PAGE; saveFilters(); writeHash(); render(); }
 
 // ---------------------------------------------------------------- data helpers
 // Sample ProtonDB summaries: appid -> [tier, report count]
@@ -472,6 +593,7 @@ function sampleGames() {
     deck, hltb: h ? { main: h[0], extra: h[1], complete: h[2] } : null,
     genres, metacritic: mc, year, controller: null,
     proton: SAMPLE_PROTON[appid] ? { tier: SAMPLE_PROTON[appid][0], total: SAMPLE_PROTON[appid][1] } : null,
+    hasProton: true, hasDetails: true,
   }));
 }
 function normalize(g) {
@@ -490,6 +612,8 @@ function normalize(g) {
     year: n(g.year),
     controller: g.controller === "full" || g.controller === "partial" ? g.controller : null,
     proton: g.proton && typeof g.proton.tier === "string" ? { tier: g.proton.tier, total: n(g.proton.total) || 0 } : null,
+    hasProton: Object.prototype.hasOwnProperty.call(g, "proton"),
+    hasDetails: (Array.isArray(g.genres) && g.genres.length > 0) || n(g.year) !== null,
   };
 }
 const playState = (g) => (g.playtime === 0 ? "never" : g.playtime < TRIED_MIN ? "tried" : "played");
@@ -665,7 +789,7 @@ function renderOverview() {
     html += `<tr><th scope="row" class="rowh">${deckBadge(d)}</th>`;
     LEN.forEach((l) => {
       const n = cells[d + "|" + l.k] || 0;
-      const sel = f.view === "backlog" && f.len === l.k && f.deck.length === 1 && f.deck[0] === d;
+      const sel = f.view === "backlog" && durKey(f) === l.k && f.deck.length === 1 && f.deck[0] === d;
       if (!n) {
         html += `<td><div class="cell zero" style="background:var(--surface-2)" aria-label="${DECK[d].label}, ${l.label}: none">·</div></td>`;
       } else {
@@ -692,10 +816,53 @@ function pickCard(g, i, why) {
   </article>`;
 }
 
+// Does a game pass the filter panel? (Show and search are applied in filtered().)
+function mainLen(g, src) { return g.hltb && g.hltb[src] != null ? g.hltb[src] : null; }
+function passes(g) {
+  const f = S.f;
+  if (f.deck.length && !f.deck.includes(g.deck)) return false;
+  if (f.gen.length) {
+    const has = g.genres || [];
+    if (!has.length) { if (!f.genUnk) return false; }
+    else {
+      const ok = f.gm === "all" ? f.gen.every((x) => has.includes(x)) : f.gen.some((x) => has.includes(x));
+      if (!ok) return false;
+    }
+  }
+  if (f.dnone || f.dmin !== null || f.dmax !== null) {
+    const v = mainLen(g, f.dsrc);
+    if (f.dnone) { if (v !== null) return false; }
+    else if (v === null) { if (!f.durUnk) return false; }
+    else if ((f.dmin !== null && v < f.dmin) || (f.dmax !== null && v > f.dmax)) return false;
+  }
+  if (f.pt.length) {
+    const tier = g.proton && g.proton.tier;
+    if (!tier) { if (!f.ptUnk) return false; }
+    else if (!f.pt.includes(tier)) return false;
+  }
+  if (f.mc !== null) {
+    if (!g.metacritic) { if (!f.mcUnk) return false; }
+    else if (g.metacritic < f.mc) return false;
+  }
+  if (f.ymin !== null || f.ymax !== null) {
+    if (!g.year) { if (!f.yrUnk) return false; }
+    else if ((f.ymin !== null && g.year < f.ymin) || (f.ymax !== null && g.year > f.ymax)) return false;
+  }
+  if (f.ctrl.length) {
+    if (!g.controller && !g.hasDetails) { if (!f.ctrlUnk) return false; }
+    else if (!f.ctrl.includes(g.controller || "none")) return false;
+  }
+  if (f.play.length && !f.play.includes(playState(g))) return false;
+  if (f.lane.length && !f.lane.includes(lane(g) || "none")) return false;
+  if (f.notes && (f.notes === "yes") !== S.notes.has(g.appid)) return false;
+  return true;
+}
+
 function renderPicks() {
-  const top = S.games.filter(inBacklog).sort((a, b) => score(b) - score(a)).slice(0, 6);
+  const top = S.games.filter((g) => inBacklog(g) && passes(g)).sort((a, b) => score(b) - score(a)).slice(0, 6);
+  const msg = activeCount() ? "No backlog games match these filters." : "Nothing left in the backlog. Everything is played, skipped or finished.";
   $("picks").innerHTML = top.length ? top.map((g, i) => pickCard(g, i)).join("") :
-    `<div class="panel" style="grid-column:1/-1"><p>Nothing left in the backlog. Everything is played, skipped or finished.</p></div>`;
+    `<div class="panel" style="grid-column:1/-1"><p>${msg}</p></div>`;
 }
 
 function filtered() {
@@ -709,8 +876,7 @@ function filtered() {
       case "played": if (st !== "played" || isClosed(g)) return false; break;
       case "closed": if (!isClosed(g)) return false; break;
     }
-    if (f.len && lenBucket(g) !== f.len) return false;
-    if (f.deck.length && !f.deck.includes(g.deck)) return false;
+    if (!passes(g)) return false;
     if (q && !(g.name.toLowerCase().includes(q) || g.genres.some((x) => x.toLowerCase().includes(q)))) return false;
     return true;
   });
@@ -728,16 +894,70 @@ function filtered() {
   return out.sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
 }
 
+// ---------------------------------------------------------------- filter panel
+function segHtml(key, opts) {
+  return `<div class="seg" role="group" aria-label="${esc(key)}">${opts.map(([v, label]) => {
+    const on = S.f[key].map(String).includes(String(v));
+    return `<button type="button" data-fa="${esc(key)}" data-fv="${esc(v)}" aria-pressed="${on}">${esc(label)}</button>`;
+  }).join("")}</div>`;
+}
+function unkHtml(key) {
+  return `<label class="unk"><input type="checkbox" data-fb="${key}" ${S.f[key] ? "checked" : ""}> Include unknown</label>`;
+}
+function fgroup(title, body, unk) {
+  return `<div class="fgroup"><div class="fhead"><span>${esc(title)}</span>${unk ? unkHtml(unk) : ""}</div>${body}</div>`;
+}
+function topGenres() {
+  const counts = new Map();
+  S.games.forEach((g) => (g.genres || []).forEach((x) => counts.set(x, (counts.get(x) || 0) + 1)));
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 30).map(([k]) => k);
+}
+const TIER_LABELS = { native: "Native", platinum: "Platinum", gold: "Gold", silver: "Silver", bronze: "Bronze", borked: "Borked", pending: "Pending" };
+function renderPanel() {
+  const f = S.f;
+  const hasProton = S.games.some((g) => g.hasProton);
+  const genres = topGenres();
+  const parts = [];
+  parts.push(fgroup("Genre",
+    (genres.length
+      ? segHtml("gen", genres.map((x) => [x, x])) +
+        `<div class="radio"><label><input type="radio" name="gm" data-fs="gm" value="any" ${f.gm === "any" ? "checked" : ""}> Any of these</label> <label><input type="radio" name="gm" data-fs="gm" value="all" ${f.gm === "all" ? "checked" : ""}> All of these</label></div>`
+      : `<p class="fhint">No genre data yet. Re-export with --details.</p>`), "genUnk"));
+  parts.push(fgroup("Duration (HowLongToBeat)",
+    `<div class="frow"><label>Length from<select data-fs="dsrc">${[["main", "Main story"], ["extra", "Main + extras"], ["complete", "Completionist"]].map(([v, l]) => `<option value="${v}" ${f.dsrc === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+     <div class="frow"><label>Min hours<input type="number" min="0" step="0.1" data-fs="dmin" value="${f.dmin ?? ""}"></label><label>Max hours<input type="number" min="0" step="0.1" data-fs="dmax" value="${f.dmax ?? ""}"></label></div>
+     <label class="unk"><input type="checkbox" data-fb="dnone" ${f.dnone ? "checked" : ""}> Only games with no HLTB data</label>`, "durUnk"));
+  parts.push(fgroup("ProtonDB tier",
+    segHtml("pt", TIERS.map((t) => [t, TIER_LABELS[t]])) +
+    (hasProton ? "" : `<p class="fhint">ProtonDB needs a newer export. Re-export to enable this filter.</p>`), "ptUnk"));
+  parts.push(fgroup("Metacritic",
+    `<select data-fs="mc"><option value="">Any score</option>${MC_OPTS.map((v) => `<option value="${v}" ${f.mc === v ? "selected" : ""}>${v}+</option>`).join("")}</select>`, "mcUnk"));
+  parts.push(fgroup("Release year",
+    `<div class="frow"><label>From<input type="number" min="1950" max="2100" step="1" data-fs="ymin" value="${f.ymin ?? ""}"></label><label>To<input type="number" min="1950" max="2100" step="1" data-fs="ymax" value="${f.ymax ?? ""}"></label></div>`, "yrUnk"));
+  parts.push(fgroup("Deck status", segHtml("deck", DECK_ORDER.map((d) => [String(d), DECK[d].label]))));
+  parts.push(fgroup("Controller support", segHtml("ctrl", [["full", "Full"], ["partial", "Partial"], ["none", "None listed"]]), "ctrlUnk"));
+  parts.push(fgroup("Play state", segHtml("play", [["never", "Never launched"], ["tried", "Tried (under 2h)"], ["played", "Played 2h+"]])));
+  parts.push(fgroup("Triage lane", segHtml("lane", [["none", "No lane"], ["next", "Up next"], ["someday", "Someday"], ["skip", "Skipped"], ["done", "Finished"]])));
+  if (canEdit()) {
+    parts.push(fgroup("Notes",
+      `<select data-fs="notes"><option value="">Any</option><option value="yes" ${f.notes === "yes" ? "selected" : ""}>Has a note</option><option value="no" ${f.notes === "no" ? "selected" : ""}>No note</option></select>`));
+  }
+  $("fbody").innerHTML = parts.join("");
+  const n = activeCount();
+  $("fcount").textContent = n ? `${n} on` : "";
+}
+
 function renderList() {
   const f = S.f;
-  $("q").value = f.q; $("view").value = f.view; $("len").value = f.len; $("sort").value = f.sort;
-  $("deckSeg").innerHTML = DECK_ORDER.map((d) =>
-    `<button type="button" data-deckf="${d}" aria-pressed="${f.deck.includes(d)}"><i style="background:var(--${["unk", "crit", "warn", "good"][d]})"></i>${DECK[d].label}</button>`).join("");
+  renderPanel();
+  $("q").value = f.q; $("view").value = f.view; $("sort").value = f.sort;
   const rows = filtered();
   const vis = rows.slice(0, S.shown);
-  const filtersOn = f.q || f.len || f.deck.length || f.view !== "backlog";
+  const n = activeCount();
+  const filtersOn = n > 0 || f.view !== "backlog";
   $("clearBtn").hidden = !filtersOn;
-  $("countLine").textContent = `Showing ${vis.length.toLocaleString()} of ${rows.length.toLocaleString()} ${rows.length === 1 ? "game" : "games"}`;
+  $("countLine").textContent = `Showing ${vis.length.toLocaleString()} of ${rows.length.toLocaleString()} ${rows.length === 1 ? "game" : "games"}` +
+    (n ? ` · ${n} filter${n === 1 ? "" : "s"} on` : "");
   let html = `<div class="row head"><span>Game</span><span>Played</span><span>Deck</span><span>Length (HLTB)</span><span>Triage</span></div>`;
   if (!vis.length) html += `<div class="empty">No games match these filters.</div>`;
   html += vis.map((g) => {
@@ -763,27 +983,36 @@ function renderList() {
 
 // ---------------------------------------------------------------- interactions
 let qTimer;
-$("q").addEventListener("input", (e) => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.f.q = e.target.value; S.shown = PAGE; renderList(); }, 120); });
-$("view").addEventListener("change", (e) => { S.f.view = e.target.value; S.shown = PAGE; saveFilters(); renderList(); renderOverview(); });
-$("len").addEventListener("change", (e) => { S.f.len = e.target.value; S.shown = PAGE; saveFilters(); renderList(); renderOverview(); });
-$("sort").addEventListener("change", (e) => { S.f.sort = e.target.value; saveFilters(); renderList(); });
-$("clearBtn").addEventListener("click", () => { S.f = { q: "", view: "backlog", len: "", sort: S.f.sort, deck: [] }; S.shown = PAGE; saveFilters(); renderList(); renderOverview(); });
+$("q").addEventListener("input", (e) => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.f.q = e.target.value.slice(0, 200); apply(); }, 120); });
+$("view").addEventListener("change", (e) => { S.f.view = e.target.value; apply(); });
+$("sort").addEventListener("change", (e) => { S.f.sort = e.target.value; apply(); });
+$("clearBtn").addEventListener("click", () => { S.f = clean({ sort: S.f.sort }); apply(); });
+// Panel controls: buttons toggle list values, checkboxes and fields set one value.
+function toggleArr(key, v) {
+  const s = String(v);
+  const cur = S.f[key];
+  const on = cur.map(String).includes(s);
+  S.f[key] = on ? cur.filter((x) => String(x) !== s) : [...cur, key === "deck" ? Number(v) : s];
+  S.f = clean(S.f);
+  apply();
+}
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset && t.dataset.fb !== undefined) { S.f[t.dataset.fb] = t.checked; S.f = clean(S.f); apply(); return; }
+  if (t.dataset && t.dataset.fs !== undefined) { S.f[t.dataset.fs] = t.value; S.f = clean(S.f); apply(); }
+});
 $("showHowto").addEventListener("click", () => { $("howto").open = true; $("howto").scrollIntoView({ behavior: "smooth", block: "start" }); });
 
 document.addEventListener("click", (e) => {
   const t = e.target.closest("button");
   if (!t) return;
   if (t.dataset.lane) { setLane(Number(t.dataset.appid), t.dataset.lane); return; }
-  if (t.dataset.deckf !== undefined) {
-    const d = Number(t.dataset.deckf);
-    S.f.deck = S.f.deck.includes(d) ? S.f.deck.filter((x) => x !== d) : [...S.f.deck, d];
-    S.shown = PAGE; saveFilters(); renderList(); renderOverview(); return;
-  }
+  if (t.dataset.fa !== undefined) { toggleArr(t.dataset.fa, t.dataset.fv); return; }
   if (t.classList.contains("cell") && t.dataset.deck !== undefined) {
     const d = Number(t.dataset.deck), l = t.dataset.len;
-    const same = S.f.view === "backlog" && S.f.len === l && S.f.deck.length === 1 && S.f.deck[0] === d;
-    S.f = { ...S.f, view: "backlog", len: same ? "" : l, deck: same ? [] : [d] };
-    S.shown = PAGE; saveFilters(); renderOverview(); renderList();
+    const same = S.f.view === "backlog" && durKey(S.f) === l && S.f.deck.length === 1 && S.f.deck[0] === d;
+    S.f = clean({ ...S.f, view: "backlog", ...durFields(same ? null : l), deck: same ? [] : [d] });
+    apply();
     if (!same) $("listH").scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
@@ -1065,7 +1294,7 @@ async function bootSample() {
     e.preventDefault();
     const mood = $("askMood").value.trim() || "Something good to start tonight";
     const time = $("askTime").value;
-    const cands = S.games.filter(inBacklog).filter((g) => g.deck !== 1).sort((a, b) => score(b) - score(a)).slice(0, 90);
+    const cands = S.games.filter(inBacklog).filter(passes).filter((g) => g.deck !== 1).sort((a, b) => score(b) - score(a)).slice(0, 90);
     if (cands.length < 3) { showAsk(`<p class="ask-status">There aren't enough backlog games left to choose from.</p>`); return; }
     const lines = cands.map((g) => [g.appid, g.name, DECK[g.deck].label, mainH(g) ? fmtH(mainH(g)) + "h" : "?", g.playtime + "min", g.genres.join("/") || "-", g.metacritic || "-"].join(" | ")).join("\n");
     const prompt = `You are helping someone choose what to play from their Steam backlog on a Steam Deck.\nWhat they want: "${mood}"\nTime they have: ${time}\n\nCandidates, one per line: id | name | Steam Deck rating | HowLongToBeat main-story hours | minutes already played | genres | Metacritic\n${lines}\n\nPick exactly 3 different games from the candidates that best fit what they want and the time they have. Use your own knowledge of each game's feel and pacing. Prefer Verified over Playable when the fit is otherwise close.\nReply with JSON only: {"picks":[{"id":<id number>,"why":"<one sentence, at most 24 words, specific to this game and their request>"}]}`;
