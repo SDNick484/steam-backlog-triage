@@ -13,7 +13,7 @@ The dashboard then shows:
 - **Couch picks:** the six best backlog candidates for the Deck, ranked by how little you've played them, Deck rating, length and Metacritic score.
 - **Triage lanes:** mark games *Next*, *Someday*, *Skip* or *Done*. The marks are saved on the server, so every device sees the same lists.
 - **Notes and order** (self-hosted only): add a note to any game, and reorder the *Up next* lane by dragging rows or with the *Move up* and *Move down* buttons. Both are saved on the server in `notes.json` and `order.json`.
-- **The full list:** filters for Deck rating, length, triage lane and search, plus sorting.
+- **The full list:** search, plus a filter panel for genre (any or all), HowLongToBeat length (main, extras or completionist), ProtonDB tier, Metacritic minimum, release year, Deck status, controller support, play state, triage lane and notes. Each filter has an *include unknown* option for games with no data. Filters combine with AND, and the state is kept in the URL, so a filtered view can be bookmarked. Couch picks respect the filters.
 
 Everything is standard-library Python, plus the optional [`howlongtobeatpy`](https://pypi.org/project/howlongtobeatpy/) package for HowLongToBeat times. The page is a single HTML file with no build step.
 
