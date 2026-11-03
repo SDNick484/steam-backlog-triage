@@ -16,6 +16,9 @@ Standard library only. Serves:
 
 Notes and order live in notes.json and order.json next to triage.json.
 
+Every response carries X-Backlog-Server: 1 and X-Backlog-Api: 2 (the API version). GET
+/api/library sends an ETag and honors If-None-Match, answering 304 when it still matches.
+
 There is no authentication. Bind it to your LAN or a VPN, or put it behind an
 authenticating proxy (for example Cloudflare Access); don't expose it directly.
 
@@ -27,13 +30,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Bumped only for changes a client must know about. API 1 is the original server; API 2 adds
+# ETags, conditional PUTs, `previous` values and the export routes. Clients read it from the
+# X-Backlog-Api response header (no header means API 1).
+API_VERSION = "2"
 LANES = {"", "next", "someday", "skip", "done"}
 MAX_BODY = 32 * 1024 * 1024
 NOTE_MAX = 2000
@@ -67,6 +76,28 @@ def atomic_write(path: str, data: bytes) -> None:
         raise
 
 
+def etag_of(body: bytes) -> str:
+    """Strong validator: the first 32 hex characters of SHA-256 over the exact bytes served."""
+    return '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+
+
+ETAG_TOKEN = re.compile(r'(?:W/)?"[^"]*"|\*')
+
+
+def none_match(header: str | None, etag: str) -> bool:
+    """True if an If-None-Match value matches `etag` under weak comparison (W/"x" matches "x").
+
+    The value is a comma-separated list of entity tags, or `*`. Anything that doesn't parse
+    simply doesn't match, so the client gets a normal 200 rather than an error.
+    """
+    if not header:
+        return False
+    for tok in ETAG_TOKEN.findall(header):
+        if tok == "*" or (tok[2:] if tok.startswith("W/") else tok) == etag:
+            return True
+    return False
+
+
 def config_script(cfg: dict) -> str:
     """Expose server settings (page links) to the page as window.APP_CONFIG."""
     js = json.dumps(cfg).replace("</", "<\\/")
@@ -82,6 +113,28 @@ class App:
         self.order = os.path.join(data_dir, "order.json")
         self.head = SKELETON_HEAD.replace("{config}", config_script({"nav": nav}))
         self.lock = threading.Lock()
+        # The library is 1-2 MB, so its ETag is remembered per (inode, mtime, size). Every writer
+        # replaces the file atomically (new inode), which makes that key safe.
+        self._lib_mu = threading.Lock()
+        self._lib_key: tuple[int, int, int] | None = None
+        self._lib_etag: str | None = None
+
+    def library_etag_and_body(self, want_body: bool) -> tuple[str, bytes | None]:
+        """Return (etag, body) for the library; body is None only if it wasn't needed and the ETag
+        was already known. Raises FileNotFoundError before the first export."""
+        with open(self.library, "rb") as f:
+            st = os.fstat(f.fileno())
+            key = (st.st_ino, st.st_mtime_ns, st.st_size)
+            with self._lib_mu:
+                etag = self._lib_etag if key == self._lib_key else None
+            if etag is not None and not want_body:
+                return etag, None
+            body = f.read()
+        if etag is None:
+            etag = etag_of(body)
+            with self._lib_mu:
+                self._lib_key, self._lib_etag = key, etag
+        return etag, body
 
     def page_bytes(self) -> bytes:
         with open(self.page, "rb") as f:
@@ -116,15 +169,25 @@ def make_handler(app: App):
         def log_message(self, fmt, *args):
             sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
 
-        def send(self, status: int, body: bytes = b"", ctype: str = "application/json") -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            # The page checks for this header to know it's self-hosted (vs. a Claude artifact).
+        def send_response(self, code, message=None):
+            # Here rather than in send() so that every response carries them, including the
+            # standard library's own error pages (bad request line, unsupported method, ...).
+            super().send_response(code, message)
+            # The page checks X-Backlog-Server to know it's self-hosted (vs. a Claude artifact).
             self.send_header("X-Backlog-Server", "1")
+            self.send_header("X-Backlog-Api", API_VERSION)
+
+        def send(self, status: int, body: bytes = b"", ctype: str = "application/json",
+                 headers: dict[str, str] | None = None) -> None:
+            self.send_response(status)
+            if status != 304:  # a 304 has no body, and no length for the 200 it stands in for
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
-            if self.command != "HEAD":
+            if self.command != "HEAD" and status != 304:
                 self.wfile.write(body)
 
         def json(self, status: int, obj) -> None:
@@ -145,8 +208,12 @@ def make_handler(app: App):
                     return self.json(500, {"error": "dashboard page missing"})
             if path == "/api/library":
                 try:
-                    with open(app.library, "rb") as f:
-                        return self.send(200, f.read())
+                    etag, body = app.library_etag_and_body(want_body=False)
+                    if none_match(self.headers.get("If-None-Match"), etag):
+                        return self.send(304, headers={"ETag": etag})
+                    if body is None:  # ETag was cached; now fetch the bytes that go with it
+                        etag, body = app.library_etag_and_body(want_body=True)
+                    return self.send(200, body, headers={"ETag": etag})
                 except FileNotFoundError:
                     return self.json(404, {"error": "no export yet"})
             if path == "/api/triage":
