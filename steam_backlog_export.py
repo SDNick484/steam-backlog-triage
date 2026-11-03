@@ -470,8 +470,12 @@ def main() -> None:
         "persona": persona,
         "games": games,
     }
-    with open(args.out, "w", encoding="utf-8") as f:
+    # Write beside the target and rename over it, so the dashboard server (which serves this file
+    # and hashes it for its ETag) never sees a half-written library. Same pattern as Cache.save().
+    tmp = args.out + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp, args.out)
 
     n = len(games)
     counts = {label: sum(1 for x in games if x["deck"] == k) for k, label in DECK_LABELS.items()}

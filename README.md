@@ -24,7 +24,8 @@ Everything is standard-library Python, plus the optional [`howlongtobeatpy`](htt
 | `steam_backlog_export.py` | Exports your library to `steam_backlog.json`, caching lookups so later runs are fast |
 | `backlog_server.py` | Serves the dashboard and its small JSON API |
 | `backlog.html` | The dashboard page |
-| `run-export.sh` | Wrapper for cron/systemd that reads your keys from `~/.steam-env` |
+| `SCORING.md` | How the couch score is computed (the spec other tools implement) |
+| `run-export.sh` | Wrapper for cron/systemd and the dashboard's **Refresh library** button; reads your keys from `~/.steam-env` and takes the export lock |
 | `install/alpine.sh` | Installer for Alpine Linux (OpenRC); works well in a small Proxmox LXC |
 | `contrib/systemd/` | Service and timer units for systemd hosts |
 
@@ -86,6 +87,10 @@ systemctl daemon-reload
 systemctl enable --now backlog-triage backlog-export.timer
 ```
 
+## Refresh library
+
+When the server can run exports, the dashboard header shows a **Refresh library** button. It starts the exporter on the server, shows its phase and progress while it runs, and loads the new library when it finishes. Your filters and triage marks stay as they are. If an export is already running (for example the weekly cron one), the button shows that and waits for it. It is hidden when the page isn't served by `backlog_server.py` or the server has no export command. Exports take as long as they take: a first run for a large library can be an hour or more, and later runs only fetch what's new or expired.
+
 ## Security
 
 The server has no login.
@@ -95,6 +100,8 @@ The server has no login.
 
 ## API
 
+Every response carries `X-Backlog-Server: 1` and `X-Backlog-Api: 2`.
+
 | Method | Path | |
 |---|---|---|
 | GET | `/` | Dashboard |
@@ -102,7 +109,13 @@ The server has no login.
 | GET / PUT | `/api/triage` | Triage marks; PUT `{"appid": 620, "lane": "next"}` (`""` clears) |
 | GET / PUT | `/api/notes` | Notes; PUT `{"appid": 620, "note": "..."}` (`""` clears; up to 2,000 characters) |
 | GET / PUT | `/api/order` | Up next order; PUT `{"order": [620, 1145360]}` (distinct app ids) |
+| POST | `/api/export` | Start an export in the background: 202, or 409 if one is already running. The request needs `Content-Type: application/json` (415 otherwise) |
+| GET | `/api/export/status` | The running or last export: `state`, `phase`, `progress`, recent redacted log lines, and whether the library changed |
 | GET | `/healthz` | `ok` |
+
+**ETags.** The library, triage, notes and order responses carry an `ETag`, and send `304 Not Modified` when you send a matching `If-None-Match`. A PUT to triage, notes or order may send `If-Match` with an ETag from an earlier GET; if the resource has changed since, the server answers `412` with the current ETag and writes nothing. Without `If-Match` a PUT works as it always did, which is how the page uses them. Each successful PUT also returns the value it replaced as `previous`.
+
+**Exports.** `POST /api/export` runs `run-export.sh` (or `--export-cmd PATH`) as a child process, one run at a time. The server never sees your keys; `run-export.sh` reads `~/.steam-env` itself, so the server's user needs a `HOME` that points at the directory holding it. A run takes a lock on `<data>/.export.lock`, so a cron export counts as a running export too: the status shows it with `origin: "external"`, and a POST gets 409. Cron and the server must therefore use the same data directory. Log lines in the status are redacted (SteamID, key parameters, paths, IP addresses); the full output stays in `export-last.log` in the data directory (mode 600). A run over `--export-timeout` seconds (default 10800) is stopped with SIGINT, then SIGTERM, then SIGKILL, so the exporter can save its cache. A server with no export command answers 501.
 
 ## Claude artifact mode
 
