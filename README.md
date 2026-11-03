@@ -12,6 +12,7 @@ The dashboard then shows:
 - **Library overview:** how much of your library you've played, and a grid of unplayed games by Deck rating and length. Click a cell to filter.
 - **Couch picks:** the six best backlog candidates for the Deck, ranked by how little you've played them, Deck rating, length and Metacritic score.
 - **Triage lanes:** mark games *Next*, *Someday*, *Skip* or *Done*. The marks are saved on the server, so every device sees the same lists.
+- **Notes and order** (self-hosted only): add a note to any game, and reorder the *Up next* lane by dragging rows or with the *Move up* and *Move down* buttons. Both are saved on the server in `notes.json` and `order.json`.
 - **The full list:** filters for Deck rating, length, triage lane and search, plus sorting.
 
 Everything is standard-library Python, plus the optional [`howlongtobeatpy`](https://pypi.org/project/howlongtobeatpy/) package for HowLongToBeat times. The page is a single HTML file with no build step.
@@ -99,9 +100,13 @@ The server has no login.
 | GET | `/` | Dashboard |
 | GET / PUT | `/api/library` | The current export (PUT replaces it; used by the page's **Load export** button) |
 | GET / PUT | `/api/triage` | Triage marks; PUT `{"appid": 620, "lane": "next"}` (`""` clears) |
+| GET / PUT | `/api/notes` | Notes; PUT `{"appid": 620, "note": "..."}` (`""` clears; up to 2,000 characters) |
+| GET / PUT | `/api/order` | Up next order; PUT `{"order": [620, 1145360]}` (distinct app ids) |
 | GET | `/healthz` | `ok` |
 
 ## Claude artifact mode
+
+Notes and the Up next order are only saved by the self-hosted server. The artifact copy shows the lanes and the library but has no note or reorder controls.
 
 `backlog.html` can also be published as a [Claude](https://claude.ai) artifact. When it isn't served by `backlog_server.py`, it stores the library and triage marks in the artifact's database. It also offers an "Ask Claude for a pick" box. Self-hosted, these features simply stay off.
 
