@@ -8,7 +8,13 @@ Standard library only. Serves:
   PUT  /api/library     replace it (the page's "Load export" button)
   GET  /api/triage      {appid: lane} for Next / Someday / Skip / Done marks
   PUT  /api/triage      {"appid": 620, "lane": "next"}  ("" clears)
+  GET  /api/notes       {appid: note} for per-game notes
+  PUT  /api/notes       {"appid": 620, "note": "..."}  ("" clears; max 2000 characters)
+  GET  /api/order       [appid, ...] order of the Up next lane
+  PUT  /api/order       {"order": [620, 1145360, ...]}  (a list of distinct app ids)
   GET  /healthz         "ok"
+
+Notes and order live in notes.json and order.json next to triage.json.
 
 There is no authentication. Bind it to your LAN or a VPN, or put it behind an
 authenticating proxy (for example Cloudflare Access); don't expose it directly.
@@ -30,6 +36,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LANES = {"", "next", "someday", "skip", "done"}
 MAX_BODY = 32 * 1024 * 1024
+NOTE_MAX = 2000
+ORDER_MAX = 5000
 
 # backlog.html is written as a page body (it can also be published as a Claude artifact,
 # whose viewer supplies the document shell). Wrap it in a minimal document here.
@@ -70,6 +78,8 @@ class App:
         self.page = page
         self.library = os.path.join(data_dir, "steam_backlog.json")
         self.triage = os.path.join(data_dir, "triage.json")
+        self.notes = os.path.join(data_dir, "notes.json")
+        self.order = os.path.join(data_dir, "order.json")
         self.head = SKELETON_HEAD.replace("{config}", config_script({"nav": nav}))
         self.lock = threading.Lock()
 
@@ -78,11 +88,25 @@ class App:
             return self.head.encode() + f.read() + SKELETON_TAIL.encode()
 
     def read_triage(self) -> dict:
-        try:
-            with open(self.triage, encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError):
-            return {}
+        return read_json(self.triage, {})
+
+    def read_notes(self) -> dict:
+        return read_json(self.notes, {})
+
+    def read_order(self) -> list:
+        return read_json(self.order, [])
+
+
+def read_json(path: str, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def is_app_id(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
 
 
 def make_handler(app: App):
@@ -128,6 +152,12 @@ def make_handler(app: App):
             if path == "/api/triage":
                 with app.lock:
                     return self.json(200, app.read_triage())
+            if path == "/api/notes":
+                with app.lock:
+                    return self.json(200, app.read_notes())
+            if path == "/api/order":
+                with app.lock:
+                    return self.json(200, app.read_order())
             if path == "/healthz":
                 return self.send(200, b"ok", "text/plain")
             self.json(404, {"error": "not found"})
@@ -152,6 +182,35 @@ def make_handler(app: App):
                         t.pop(str(appid), None)
                     atomic_write(app.triage, json.dumps(t, separators=(",", ":")).encode())
                 return self.json(200, {"ok": True})
+            if path == "/api/notes":
+                if not isinstance(data, dict):
+                    return self.json(400, {"error": "expected a JSON object"})
+                appid, note = data.get("appid"), data.get("note", "")
+                if not is_app_id(appid) or not isinstance(note, str):
+                    return self.json(400, {"error": "expected {appid: int, note: string}"})
+                note = note.strip()
+                if len(note) > NOTE_MAX:
+                    return self.json(400, {"error": f"notes are limited to {NOTE_MAX} characters"})
+                with app.lock:
+                    n = app.read_notes()
+                    if note:
+                        n[str(appid)] = note
+                    else:
+                        n.pop(str(appid), None)
+                    atomic_write(app.notes, json.dumps(n, ensure_ascii=False, separators=(",", ":")).encode())
+                return self.json(200, {"ok": True})
+            if path == "/api/order":
+                order = data.get("order") if isinstance(data, dict) else None
+                if not isinstance(order, list) or len(order) > ORDER_MAX or not all(is_app_id(a) for a in order):
+                    return self.json(400, {"error": f"expected {{order: [app ids, up to {ORDER_MAX}]}}"})
+                seen, clean = set(), []
+                for a in order:
+                    if a not in seen:
+                        seen.add(a)
+                        clean.append(a)
+                with app.lock:
+                    atomic_write(app.order, json.dumps(clean, separators=(",", ":")).encode())
+                return self.json(200, {"ok": True, "count": len(clean)})
             if path == "/api/library":
                 games = data.get("games") if isinstance(data, dict) else None
                 if not isinstance(games, list) or not all(isinstance(g, dict) and "appid" in g for g in games):
