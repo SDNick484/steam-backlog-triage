@@ -183,6 +183,11 @@ input::placeholder{color:var(--muted)}
 .g-play{font-size:13.5px;display:flex;flex-direction:column;gap:1px}
 .g-play small{font-size:12px;color:var(--muted)}
 .g-len{font-size:13.5px}
+.g-rev{display:block;font-size:12px;color:var(--muted);margin-top:3px;font-weight:500}
+.g-rev.proton{color:var(--ink-2)}
+.g-rev.proton.t-platinum,.g-rev.proton.t-native{color:var(--good-ink)}
+.g-rev.proton.t-gold{color:var(--warn-ink)}
+.g-rev.proton.t-borked{color:var(--crit-ink)}
 .g-len .lenbar{gap:3px}
 .empty{padding:28px 16px;text-align:center;color:var(--muted)}
 .more{display:flex;justify-content:center;padding:12px;border-top:1px solid var(--line)}
@@ -440,6 +445,12 @@ try { const saved = JSON.parse(localStorage.getItem("bt-filters") || "null"); if
 function saveFilters() { try { localStorage.setItem("bt-filters", JSON.stringify({ ...S.f, q: "" })); } catch (e) {} }
 
 // ---------------------------------------------------------------- data helpers
+// Sample ProtonDB summaries: appid -> [tier, report count]
+const SAMPLE_PROTON = {
+  620: ["platinum", 350], 1145360: ["native", 120], 413150: ["native", 1200], 870780: ["gold", 980],
+  546560: ["gold", 410], 1174180: ["gold", 2400], 1245620: ["gold", 3900], 1086940: ["platinum", 3100],
+  219150: ["silver", 210], 1091500: ["borked", 500],
+};
 function sampleGames() {
   const now = Date.now() / 1000;
   return SAMPLE.map(([appid, name, pt, dpt, days, deck, h, genres, mc, year]) => ({
@@ -447,6 +458,7 @@ function sampleGames() {
     lastPlayed: days ? Math.round(now - days * 86400) : 0,
     deck, hltb: h ? { main: h[0], extra: h[1], complete: h[2] } : null,
     genres, metacritic: mc, year, controller: null,
+    proton: SAMPLE_PROTON[appid] ? { tier: SAMPLE_PROTON[appid][0], total: SAMPLE_PROTON[appid][1] } : null,
   }));
 }
 function normalize(g) {
@@ -464,6 +476,7 @@ function normalize(g) {
     metacritic: n(g.metacritic),
     year: n(g.year),
     controller: g.controller === "full" || g.controller === "partial" ? g.controller : null,
+    proton: g.proton && typeof g.proton.tier === "string" ? { tier: g.proton.tier, total: n(g.proton.total) || 0 } : null,
   };
 }
 const playState = (g) => (g.playtime === 0 ? "never" : g.playtime < TRIED_MIN ? "tried" : "played");
@@ -507,6 +520,16 @@ function ago(ts) {
   if (d < 60) return `${Math.round(d / 7)} wk ago`;
   if (d < 365) return `${Math.round(d / 30)} mo ago`;
   return `${(d / 365).toFixed(d < 3650 ? 1 : 0).replace(/\.0$/, "")} yr ago`;
+}
+const PROTON = {
+  native: "Native", platinum: "Platinum", gold: "Gold", silver: "Silver",
+  bronze: "Bronze", borked: "Borked", pending: "Pending",
+};
+function protonChip(g) {
+  if (!g.proton || !g.proton.tier) return "";
+  const label = PROTON[g.proton.tier] || g.proton.tier;
+  const reports = g.proton.total ? ` · ${g.proton.total.toLocaleString()} reports` : "";
+  return `<small class="g-rev proton t-${esc(g.proton.tier)}" title="ProtonDB community reports">ProtonDB ${esc(label)}${esc(reports)}</small>`;
 }
 function deckBadge(d) { return `<span class="deck d${d}"><i aria-hidden="true">${DECK[d].icon}</i>${DECK[d].label}</span>`; }
 function lenBar(g, maxH = 60) {
@@ -686,7 +709,7 @@ function renderList() {
     return `<div class="row">
       <div class="g-name"><a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" rel="noopener">${esc(g.name)}</a>${meta ? `<span class="g-meta">${esc(meta)}</span>` : ""}</div>
       <div class="g-play num">${fmtMin(g.playtime)}${g.deckPlaytime ? `<small>${fmtMin(g.deckPlaytime)} on Deck</small>` : ""}${la && g.playtime ? `<small>${la}</small>` : ""}</div>
-      <div class="g-deck">${deckBadge(g.deck)}</div>
+      <div class="g-deck">${deckBadge(g.deck)}${protonChip(g)}</div>
       <div class="g-len">${lenBar(g)}</div>
       <div class="g-lanes">${laneButtons(g, false)}</div>
     </div>`;

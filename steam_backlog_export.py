@@ -7,6 +7,7 @@ What it collects for every game you own:
   * Steam Deck compatibility: Verified / Playable / Unsupported     (Steam store)
   * HowLongToBeat main / main+extra / completionist hours           (optional, howlongtobeatpy)
   * genres, Metacritic score, release year, controller support     (optional, --details)
+  * ProtonDB tier (native..borked, pending) and report count       (ProtonDB, no key)
 
 Everything it looks up is cached in steam_backlog_cache.json, so the first run is the
 slow one and later runs only fetch games that are new or whose cache entry has expired.
@@ -42,11 +43,12 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Overridable so the script can be tested against a local mock server.
 API_BASE = os.environ.get("STEAM_API_BASE", "https://api.steampowered.com")
 STORE_BASE = os.environ.get("STEAM_STORE_BASE", "https://store.steampowered.com")
+PROTON_BASE = os.environ.get("PROTONDB_BASE", "https://www.protondb.com")
 
 USER_AGENT = "steam-backlog-export/1.0 (+personal use)"
 
@@ -54,6 +56,12 @@ USER_AGENT = "steam-backlog-export/1.0 (+personal use)"
 TTL_DECK = 21
 TTL_HLTB = 90
 TTL_DETAILS = 90
+TTL_PROTON = 7
+
+# Every cache kind the exporter keeps. Loading ignores kinds not listed here.
+CACHE_KINDS = ("deck", "hltb", "details", "proton")
+
+PROTON_TIERS = {"native", "platinum", "gold", "silver", "bronze", "borked", "pending"}
 
 DECK_LABELS = {0: "Unknown", 1: "Unsupported", 2: "Playable", 3: "Verified"}
 
@@ -184,6 +192,23 @@ def fetch_deck_category(appid: int, limiter: RateLimiter) -> int | None:
     return int(cat) if isinstance(cat, int) and cat in DECK_LABELS else 0
 
 
+def fetch_proton(appid: int, limiter: RateLimiter) -> dict | None:
+    """ProtonDB summary. Returns {'tier','total'}; None on network trouble.
+
+    ProtonDB is unofficial. Missing or unexpected fields come back as tier None rather
+    than failing the export.
+    """
+    data = http_json(f"{PROTON_BASE}/api/v1/reports/summaries/{appid}.json", limiter)
+    if data is None:
+        return None  # network trouble: don't cache, try again next run
+    tier = data.get("tier") if isinstance(data, dict) else None
+    total = data.get("total") if isinstance(data, dict) else None
+    return {
+        "tier": tier if tier in PROTON_TIERS else None,
+        "total": total if isinstance(total, int) and total >= 0 else 0,
+    }
+
+
 def fetch_details(appid: int, limiter: RateLimiter) -> dict | None:
     q = urllib.parse.urlencode({"appids": appid, "l": "english", "cc": "us"})
     data = http_json(f"{STORE_BASE}/api/appdetails?{q}", limiter)
@@ -259,7 +284,7 @@ def fetch_hltb(hltb, name: str) -> dict | None:
 class Cache:
     def __init__(self, path: str, refresh: bool):
         self.path = path
-        self.data: dict = {"deck": {}, "hltb": {}, "details": {}}
+        self.data: dict = {k: {} for k in CACHE_KINDS}
         self._lock = threading.Lock()
         self._dirty = 0
         if os.path.exists(path) and not refresh:
@@ -372,6 +397,17 @@ def main() -> None:
                 log(f"  (about {len(todo) * 1.6 / 60:.0f} minutes for store details)")
             run_parallel("Store details", todo, do_details, workers=2)
 
+        # ProtonDB: roughly one request every 0.3 s, cached for TTL_PROTON days.
+        proton_limiter = RateLimiter(0.3)
+
+        def do_proton(appid: int) -> None:
+            pr = fetch_proton(appid, proton_limiter)
+            if pr is not None:
+                cache.put("proton", appid, pr)
+
+        todo = [a for a in appids if cache.get("proton", a, TTL_PROTON) is None]
+        run_parallel("ProtonDB", todo, do_proton, workers=2)
+
         # HowLongToBeat: one at a time with a pause, to be a polite guest.
         if not args.skip_hltb:
             try:
@@ -409,6 +445,7 @@ def main() -> None:
         deck = cache.get("deck", a, 10**6)
         hl = cache.get("hltb", a, 10**6)
         det = cache.get("details", a, 10**6)
+        pr = cache.get("proton", a, 10**6)
         hv = hl["v"] if hl else None
         games.append({
             "appid": a,
@@ -422,6 +459,7 @@ def main() -> None:
             "metacritic": det["v"].get("metacritic") if det else None,
             "year": det["v"].get("year") if det else None,
             "controller": det["v"].get("controller") if det else None,
+            "proton": pr["v"] if pr else None,
         })
 
     out = {
