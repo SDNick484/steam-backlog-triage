@@ -1,0 +1,978 @@
+<title>Backlog Triage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F3F5F8; --surface:#FCFCFD; --surface-2:#EAEEF3; --line:#DCE1E8; --line-strong:#C5CCD6;
+  --ink:#101621; --ink-2:#465063; --muted:#737D8F;
+  --accent:#2a78d6; --accent-ink:#1c5cab; --accent-soft:#E2EDFB; --on-accent:#fff;
+  --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --unk:#8A93A3;
+  --good-ink:#0b6e0b; --warn-ink:#8a5a00; --crit-ink:#b02f2f;
+  --shadow:0 1px 2px rgba(16,22,33,.06),0 4px 16px rgba(16,22,33,.05);
+  --display:"Chakra Petch","Bahnschrift","DIN Alternate",system-ui,sans-serif;
+  --body:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0D1015; --surface:#151A21; --surface-2:#1D232C; --line:#29303A; --line-strong:#39414D;
+    --ink:#EFF3F8; --ink-2:#B6BFCC; --muted:#8891A0;
+    --accent:#3987e5; --accent-ink:#86b6ef; --accent-soft:#15253B; --on-accent:#fff;
+    --good-ink:#3fcb3f; --warn-ink:#fab219; --crit-ink:#ef7272;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0D1015; --surface:#151A21; --surface-2:#1D232C; --line:#29303A; --line-strong:#39414D;
+  --ink:#EFF3F8; --ink-2:#B6BFCC; --muted:#8891A0;
+  --accent:#3987e5; --accent-ink:#86b6ef; --accent-soft:#15253B; --on-accent:#fff;
+  --good-ink:#3fcb3f; --warn-ink:#fab219; --crit-ink:#ef7272;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:28px 64px;display:flex;flex-direction:column;gap:28px}
+@media (max-width:560px){.wrap{padding-inline:16px;padding-block:20px 48px;gap:22px}}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;letter-spacing:.01em}
+h1{font-size:clamp(28px,4.2vw,40px);font-weight:700;line-height:1.05}
+h2{font-size:19px;font-weight:600}
+p{margin:0}
+a{color:var(--accent-ink)}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.num{font-variant-numeric:tabular-nums}
+.eyebrow{font-size:11.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+
+/* Page links (self-hosted only) */
+nav.pages{display:flex;gap:16px;font-size:13.5px;font-weight:600;margin-bottom:-14px}
+nav.pages a{color:var(--muted);text-decoration:none}
+nav.pages a[aria-current="page"]{color:var(--ink)}
+nav.pages a:hover{color:var(--accent-ink)}
+
+/* Header */
+.top{display:flex;flex-wrap:wrap;gap:16px 24px;align-items:flex-end;justify-content:space-between}
+.title-block{display:flex;flex-direction:column;gap:8px;max-width:62ch}
+.headline{font-size:16.5px;color:var(--ink-2)}
+.headline b{color:var(--ink);font-weight:600}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line-strong);background:var(--surface);padding:8px 14px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.primary:hover{filter:brightness(1.08);color:var(--on-accent)}
+.btn[disabled]{opacity:.55;cursor:default}
+.btn svg{width:16px;height:16px;flex:none}
+
+.banner{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;border:1px dashed var(--line-strong);background:var(--surface);border-radius:10px;padding:12px 16px;font-size:14px;color:var(--ink-2)}
+.banner strong{color:var(--ink)}
+.source-line{font-size:13px;color:var(--muted)}
+
+/* How-to */
+details.howto{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+details.howto>summary{cursor:pointer;list-style:none;padding:14px 18px;font-weight:600;display:flex;align-items:center;gap:10px}
+details.howto>summary::-webkit-details-marker{display:none}
+details.howto>summary::before{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .15s}
+details.howto[open]>summary::before{transform:rotate(45deg)}
+.steps{margin:0;padding:0 18px 18px 40px;display:flex;flex-direction:column;gap:12px;max-width:80ch}
+.steps li{padding-left:4px;color:var(--ink-2)}
+.steps li b{color:var(--ink)}
+.cmd{display:flex;align-items:stretch;margin-top:6px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);overflow:hidden}
+.cmd code{flex:1;min-width:0;font-family:var(--mono);font-size:12.5px;padding:9px 12px;overflow-x:auto;white-space:pre;color:var(--ink)}
+.cmd button{border:0;border-left:1px solid var(--line);background:transparent;padding:0 12px;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--accent-ink)}
+
+/* Overview */
+.overview{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:18px}
+@media (max-width:880px){.overview{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel-head{display:flex;flex-direction:column;gap:3px}
+.panel-head p{font-size:13px;color:var(--muted)}
+
+.stack{display:flex;height:22px;gap:2px}
+.stack span{display:block;height:100%;min-width:3px}
+.stack span:first-child{border-radius:4px 0 0 4px}
+.stack span:last-child{border-radius:0 4px 4px 0}
+.stack span:only-child{border-radius:4px}
+.legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.legend div{display:flex;flex-direction:column;gap:2px}
+.legend .k{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2)}
+.legend .k i{width:10px;height:10px;border-radius:3px;flex:none}
+.legend .v{font-family:var(--display);font-size:24px;font-weight:600;line-height:1.1}
+.deckline{display:flex;flex-wrap:wrap;gap:8px 14px;padding-top:12px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+
+.heat-wrap{overflow-x:auto}
+table.heat{border-collapse:separate;border-spacing:3px;width:100%;min-width:440px;table-layout:fixed}
+.heat th{font-size:12px;font-weight:600;color:var(--muted);text-align:center;padding:2px 0 6px}
+.heat th.rowh{text-align:left;width:118px;padding:0 6px 0 0;color:var(--ink-2)}
+.heat td{padding:0}
+.cell{width:100%;height:44px;border:0;border-radius:6px;cursor:pointer;font-family:var(--display);font-weight:600;font-size:17px;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;transition:transform .08s}
+.cell:hover{transform:scale(1.04)}
+.cell.zero{cursor:default;color:var(--muted);font-weight:500;font-size:14px}
+.cell.zero:hover{transform:none}
+.cell.sel{outline:2px solid var(--ink);outline-offset:1px}
+
+/* Deck badges */
+.deck{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.deck i{width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:10px;font-weight:800;color:#fff;flex:none}
+.deck.d3 i{background:var(--good)} .deck.d3{color:var(--good-ink)}
+.deck.d2 i{background:var(--warn);color:#3a2a00} .deck.d2{color:var(--warn-ink)}
+.deck.d1 i{background:var(--crit)} .deck.d1{color:var(--crit-ink)}
+.deck.d0 i{background:var(--unk)} .deck.d0{color:var(--muted)}
+
+/* Picks */
+.section-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 20px}
+.section-head .sub{font-size:13.5px;color:var(--muted);max-width:70ch}
+.picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+@media (max-width:900px){.picks{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.picks{grid-template-columns:1fr}}
+.pick{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow);min-width:0}
+.pick .rank{font-family:var(--display);font-size:13px;font-weight:600;color:var(--muted)}
+.pick h3{font-family:var(--body);font-size:17px;font-weight:700;line-height:1.25;overflow-wrap:anywhere}
+.pick .why{font-size:13.5px;color:var(--ink-2)}
+.pick-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;font-weight:500;padding:3px 8px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);white-space:nowrap}
+.chip.hl{background:var(--accent-soft);color:var(--accent-ink)}
+.pick .spacer{flex:1}
+.lenbar{display:flex;flex-direction:column;gap:4px}
+.lenbar .track{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden;display:flex;gap:2px}
+.lenbar .track span{height:100%;background:var(--accent)}
+.lenbar .track span.x{background:color-mix(in oklab,var(--accent) 45%,var(--surface-2))}
+.lenbar small{font-size:12px;color:var(--muted)}
+
+.ask{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.ask form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:12px;font-weight:600;color:var(--muted)}
+.field.grow{flex:1 1 260px}
+input[type=text],input[type=search],select{background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;font-size:14px;min-width:0;width:100%}
+input::placeholder{color:var(--muted)}
+.ask-out{display:flex;flex-direction:column;gap:12px}
+.ask-status{font-size:13.5px;color:var(--ink-2)}
+
+/* Lane control */
+.lanes{display:inline-flex;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;flex:none}
+.lanes button{border:0;background:transparent;padding:5px 9px;font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.lanes button+button{border-left:1px solid var(--line)}
+.lanes button:hover{background:var(--surface-2);color:var(--ink)}
+.lanes button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.lanes button[data-lane="skip"][aria-pressed="true"]{background:var(--ink-2);color:var(--surface)}
+.lanes button[data-lane="done"][aria-pressed="true"]{background:var(--good);color:#fff}
+
+/* Filters */
+.filters{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.filters .field{flex:0 1 auto}
+.filters .field.search{flex:1 1 220px}
+.seg{display:inline-flex;flex-wrap:wrap;gap:6px}
+.seg button{border:1px solid var(--line-strong);background:var(--surface);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink-2);display:inline-flex;align-items:center;gap:6px}
+.seg button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}
+.seg button i{width:8px;height:8px;border-radius:50%}
+.count-line{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;font-size:13px;color:var(--muted)}
+.linkish{border:0;background:none;padding:0;color:var(--accent-ink);font-weight:600;cursor:pointer;font-size:13px}
+
+/* Game list */
+.list{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 110px 104px 150px auto;gap:14px;align-items:center;padding:11px 16px;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.row.head{background:var(--surface-2);font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-block:8px}
+.g-name{display:flex;flex-direction:column;gap:2px;min-width:0}
+.g-name a{color:var(--ink);font-weight:600;text-decoration:none;overflow-wrap:anywhere}
+.g-name a:hover{color:var(--accent-ink);text-decoration:underline}
+.g-meta{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.g-play{font-size:13.5px;display:flex;flex-direction:column;gap:1px}
+.g-play small{font-size:12px;color:var(--muted)}
+.g-len{font-size:13.5px}
+.g-len .lenbar{gap:3px}
+.empty{padding:28px 16px;text-align:center;color:var(--muted)}
+.more{display:flex;justify-content:center;padding:12px;border-top:1px solid var(--line)}
+@media (max-width:820px){
+  .row.head{display:none}
+  .row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name deck" "play len" "lanes lanes";gap:8px 12px;padding:14px 16px}
+  .g-name{grid-area:name} .g-deck{grid-area:deck;justify-self:end} .g-play{grid-area:play} .g-len{grid-area:len;justify-self:end;text-align:right;min-width:110px}
+  .g-lanes{grid-area:lanes}
+}
+
+.tip{position:fixed;z-index:20;pointer-events:none;background:var(--ink);color:var(--surface);font-size:12.5px;line-height:1.35;padding:7px 10px;border-radius:7px;max-width:260px;box-shadow:var(--shadow)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:9px;font-size:14px;max-width:min(520px,calc(100vw - 32px));box-shadow:var(--shadow)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+footer{font-size:12.5px;color:var(--muted);max-width:90ch}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <nav class="pages" id="pagesNav" aria-label="Pages" hidden></nav>
+  <header class="top">
+    <div class="title-block">
+      <span class="eyebrow" id="who">Steam library</span>
+      <h1>Backlog Triage</h1>
+      <p class="headline" id="headline">Loading…</p>
+      <p class="source-line" id="sourceLine"></p>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="loadBtn" type="button">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 11V2M4.5 5.5 8 2l3.5 3.5M2.5 11v2.5h11V11"/></svg>
+        Load export
+      </button>
+      <input type="file" id="fileInput" accept=".json,application/json" hidden>
+    </div>
+  </header>
+
+  <div class="banner" id="sampleBanner" hidden>
+    <span id="bannerText"><strong>This is a sample library.</strong> Run the exporter on your PC, then choose <b>Load export</b> to replace it with yours. Triage marks on sample games aren't saved.</span>
+    <button class="btn" type="button" id="showHowto">How to export</button>
+  </div>
+
+  <details class="howto" id="howto">
+    <summary>Load your real library</summary>
+    <ol class="steps">
+      <li><b>Get a Steam Web API key</b> at <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a>. Any domain name works for the form.</li>
+      <li><b>Make your game details public.</b> In Steam, open your profile's privacy settings and set <i>Game details</i> to Public. The API returns an empty library otherwise.</li>
+      <li><b>Optional: install the HowLongToBeat helper</b> so games get length estimates.
+        <div class="cmd"><code>pip install --user howlongtobeatpy</code><button type="button" data-copy="pip install --user howlongtobeatpy">Copy</button></div></li>
+      <li><b>Run the exporter</b> (<code>steam_backlog_export.py</code> from the project repository). Add <code>--details</code> for genres, Metacritic and controller support. That first run is slower because of Steam's store rate limit. Everything is cached, so later runs only fetch new games.
+        <div class="cmd"><code>STEAM_API_KEY=your_key python3 steam_backlog_export.py --profile https://steamcommunity.com/id/yourname/ --details</code><button type="button" data-copy="STEAM_API_KEY=your_key python3 steam_backlog_export.py --profile https://steamcommunity.com/id/yourname/ --details">Copy</button></div></li>
+      <li><b>Choose Load export</b> and pick <code>steam_backlog.json</code>. The library is saved with this page, so it loads automatically next time. Re-run the exporter and load again whenever you buy a bundle.</li>
+    </ol>
+  </details>
+
+  <section class="overview" aria-label="Library overview">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>How much you've played</h2>
+        <p>Every game in the library, by playtime. "Tried" means launched for under 2 hours.</p>
+      </div>
+      <div class="stack" id="stack" role="img"></div>
+      <div class="legend" id="legend"></div>
+      <div class="deckline" id="deckline"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Where the backlog sits</h2>
+        <p>Unplayed and barely-played games by Deck rating and HowLongToBeat main-story length. Click a cell to filter the list.</p>
+      </div>
+      <div class="heat-wrap"><table class="heat" id="heat"></table></div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px" aria-labelledby="picksH">
+    <div class="section-head">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <h2 id="picksH">Couch picks</h2>
+        <p class="sub">The six best backlog candidates for the Deck, ranked by: never or barely played, Deck Verified or Playable, shorter HowLongToBeat time, higher Metacritic. Games you mark <b>Next</b> come first.</p>
+      </div>
+    </div>
+    <div class="picks" id="picks"></div>
+
+    <div class="ask" id="askPanel" hidden>
+      <form id="askForm">
+        <div class="field grow">
+          <label for="askMood">Ask Claude for a pick</label>
+          <input type="text" id="askMood" maxlength="200" placeholder="Something cozy I can put down mid-level" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="askTime">Time</label>
+          <select id="askTime">
+            <option>Under an hour</option>
+            <option selected>An evening (2–3 hours)</option>
+            <option>A few evenings this week</option>
+            <option>A long weekend</option>
+          </select>
+        </div>
+        <button class="btn primary" type="submit" id="askBtn">Pick for me</button>
+      </form>
+      <div class="ask-out" id="askOut" hidden></div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:12px" aria-labelledby="listH">
+    <h2 id="listH">All games</h2>
+    <div class="filters">
+      <div class="field search">
+        <label for="q">Search</label>
+        <input type="search" id="q" placeholder="Name or genre" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="view">Show</label>
+        <select id="view">
+          <option value="backlog">Backlog (unplayed + tried)</option>
+          <option value="next">Up next</option>
+          <option value="someday">Someday</option>
+          <option value="played">Played 2h+</option>
+          <option value="closed">Skipped or finished</option>
+          <option value="all">Everything</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="len">Length</label>
+        <select id="len">
+          <option value="">Any length</option>
+          <option value="short">Under 5h</option>
+          <option value="mid">5–15h</option>
+          <option value="long">15–40h</option>
+          <option value="epic">40h+</option>
+          <option value="none">No HLTB data</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="sort">Sort</label>
+        <select id="sort">
+          <option value="score">Couch score</option>
+          <option value="short">Shortest first</option>
+          <option value="name">Name</option>
+          <option value="recent">Recently played</option>
+          <option value="most">Most played</option>
+          <option value="mc">Metacritic</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="eyebrow" style="font-size:12px;letter-spacing:0;text-transform:none;font-weight:600">Deck rating</span>
+        <div class="seg" id="deckSeg" role="group" aria-label="Deck rating"></div>
+      </div>
+    </div>
+    <div class="count-line"><span id="countLine"></span><button class="linkish" type="button" id="clearBtn">Clear filters</button></div>
+    <div class="list" id="list"></div>
+  </section>
+
+  <footer id="foot">Deck ratings come from Valve's Steam Deck compatibility program. Length estimates come from HowLongToBeat's community averages for the main story; the lighter part of each bar is the main story plus extras. Data is as of the export date shown at the top.</footer>
+</div>
+<div class="tip" id="tip" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+(() => {
+"use strict";
+
+// ---------------------------------------------------------------- constants
+const DECK = {
+  3: { label: "Verified", icon: "✓" },
+  2: { label: "Playable", icon: "!" },
+  1: { label: "Unsupported", icon: "✕" },
+  0: { label: "Unknown", icon: "?" },
+};
+const DECK_ORDER = [3, 2, 0, 1];
+const LEN = [
+  { k: "short", label: "Under 5h" },
+  { k: "mid", label: "5–15h" },
+  { k: "long", label: "15–40h" },
+  { k: "epic", label: "40h+" },
+  { k: "none", label: "No data" },
+];
+const LANES = [
+  { k: "next", label: "Next" },
+  { k: "someday", label: "Someday" },
+  { k: "skip", label: "Skip" },
+  { k: "done", label: "Done" },
+];
+const LANE_NAMES = { next: "Up next", someday: "Someday", skip: "Skipped", done: "Finished" };
+const TRIED_MIN = 120;
+const PAGE = 60;
+const CHUNK = 200;
+
+// Sample library: [appid, name, minutes played, minutes on Deck, days since played, deck, [main, extra, complete] | null, genres, metacritic, year]
+const SAMPLE = [
+  [620,"Portal 2",640,0,900,3,[8.5,13.5,22],["Puzzle","Action"],95,2011],
+  [1145360,"Hades",1420,610,120,3,[22,48,95],["Action","Roguelike"],93,2020],
+  [413150,"Stardew Valley",5200,1900,30,3,[53,95,160],["Simulation","RPG"],89,2016],
+  [504230,"Celeste",310,310,400,3,[8,13,37],["Platformer"],94,2018],
+  [1794680,"Vampire Survivors",900,700,12,3,[15,25,70],["Action","Roguelike"],null,2022],
+  [1092790,"Inscryption",0,0,0,3,[12,15,18],["Card game","Horror"],85,2021],
+  [753640,"Outer Wilds",0,0,0,3,[17,21,24],["Adventure","Exploration"],85,2020],
+  [632470,"Disco Elysium",45,0,700,3,[22,32,45],["RPG"],91,2019],
+  [653530,"Return of the Obra Dinn",0,0,0,3,[8.5,10,11],["Puzzle","Mystery"],89,2018],
+  [1205520,"Pentiment",0,0,0,3,[16,18,22],["Adventure","Narrative"],86,2022],
+  [553420,"TUNIC",0,0,0,3,[12,22,28],["Action","Adventure"],85,2022],
+  [367520,"Hollow Knight",45,45,500,3,[27,42,63],["Metroidvania"],90,2017],
+  [646570,"Slay the Spire",90,90,200,3,[12,40,130],["Card game","Roguelike"],89,2019],
+  [1091500,"Cyberpunk 2077",70,0,600,3,[25,60,105],["RPG","Action"],86,2020],
+  [870780,"Control Ultimate Edition",0,0,0,2,[12,20,35],["Action","Shooter"],85,2019],
+  [1190460,"DEATH STRANDING",0,0,0,3,[41,63,100],["Action","Adventure"],82,2020],
+  [546560,"Half-Life: Alyx",0,0,0,1,[12,15,20],["VR","Shooter"],93,2020],
+  [1085660,"Destiny 2",30,0,1000,1,null,["Shooter","MMO"],83,2019],
+  [1055540,"A Short Hike",0,0,0,3,[1.5,3,4],["Adventure","Cozy"],null,2019],
+  [1135690,"Unpacking",0,0,0,3,[3.5,4.5,5],["Puzzle","Cozy"],84,2021],
+  [683320,"GRIS",0,0,0,3,[3.5,4,5],["Platformer","Art"],84,2018],
+  [501300,"What Remains of Edith Finch",0,0,0,3,[2,2.5,3],["Narrative"],88,2017],
+  [383870,"Firewatch",0,0,0,3,[4,5,7],["Narrative","Adventure"],81,2016],
+  [460950,"Katana ZERO",0,0,0,3,[5,6,11],["Action","Platformer"],83,2019],
+  [588650,"Dead Cells",60,60,300,3,[20,40,100],["Action","Roguelike"],87,2018],
+  [219150,"Hotline Miami",0,0,0,2,[5,6.5,15],["Action","Top-down"],85,2012],
+  [590380,"Into the Breach",0,0,0,3,[9,15,50],["Strategy","Roguelike"],90,2018],
+  [972660,"Spiritfarer",0,0,0,3,[30,35,40],["Management","Cozy"],84,2020],
+  [1244090,"Sea of Stars",20,20,90,3,[30,35,40],["RPG","Turn-based"],89,2023],
+  [1229240,"Chained Echoes",0,0,0,3,[38,50,60],["RPG","Turn-based"],null,2022],
+  [1086940,"Baldur's Gate 3",100,0,250,3,[75,110,150],["RPG","Turn-based"],96,2023],
+  [292030,"The Witcher 3: Wild Hunt",0,0,0,3,[51,103,173],["RPG","Open world"],93,2015],
+  [1174180,"Red Dead Redemption 2",0,0,0,2,[50,80,170],["Action","Open world"],93,2019],
+  [1245620,"ELDEN RING",110,0,450,3,[58,100,133],["Action","RPG"],94,2022],
+  [412020,"Metro Exodus",0,0,0,2,[15,24,40],["Shooter","Survival"],82,2019],
+  [1328670,"Mass Effect Legendary Edition",0,0,0,2,[90,120,150],["RPG","Shooter"],86,2021],
+  [264710,"Subnautica",0,0,0,2,[30,40,50],["Survival","Exploration"],87,2018],
+  [782330,"DOOM Eternal",0,0,0,3,[14,20,30],["Shooter","Action"],88,2020],
+  [1237970,"Titanfall 2",0,0,0,2,[6,8,13],["Shooter"],86,2016],
+  [1262350,"SIGNALIS",0,0,0,3,[7,9,13],["Horror","Survival"],null,2022],
+  [1497440,"COCOON",0,0,0,3,[5,5.5,6],["Puzzle","Adventure"],88,2023],
+  [2231450,"Pizza Tower",0,0,0,3,[7,10,20],["Platformer"],null,2023],
+  [1868140,"DAVE THE DIVER",40,40,60,3,[25,35,50],["Adventure","Management"],90,2023],
+  [243970,"Invisible, Inc.",0,0,0,0,[9,15,40],["Strategy","Stealth"],80,2015],
+  [370910,"Kathy Rain",0,0,0,0,[5,6,6],["Point & click","Mystery"],null,2016],
+];
+
+// ---------------------------------------------------------------- state
+const S = {
+  games: [],
+  byId: new Map(),
+  source: "sample",          // sample | local | db
+  meta: null,
+  triage: new Map(),         // appid -> lane
+  sampleTriage: new Map(),
+  db: null,
+  server: false,             // true when served by backlog_server.py
+  bucketExists: new Set(),
+  loadedVersion: null,
+  shown: PAGE,
+  f: { q: "", view: "backlog", len: "", sort: "score", deck: [] },
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+
+try { const saved = JSON.parse(localStorage.getItem("bt-filters") || "null"); if (saved) Object.assign(S.f, saved, { q: "" }); } catch (e) {}
+function saveFilters() { try { localStorage.setItem("bt-filters", JSON.stringify({ ...S.f, q: "" })); } catch (e) {} }
+
+// ---------------------------------------------------------------- data helpers
+function sampleGames() {
+  const now = Date.now() / 1000;
+  return SAMPLE.map(([appid, name, pt, dpt, days, deck, h, genres, mc, year]) => ({
+    appid, name, playtime: pt, deckPlaytime: dpt,
+    lastPlayed: days ? Math.round(now - days * 86400) : 0,
+    deck, hltb: h ? { main: h[0], extra: h[1], complete: h[2] } : null,
+    genres, metacritic: mc, year, controller: null,
+  }));
+}
+function normalize(g) {
+  const n = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+  const h = g.hltb && typeof g.hltb === "object" ? { main: n(g.hltb.main), extra: n(g.hltb.extra), complete: n(g.hltb.complete) } : null;
+  return {
+    appid: Number(g.appid),
+    name: String(g.name || `App ${g.appid}`),
+    playtime: Math.max(0, n(g.playtime) || 0),
+    deckPlaytime: Math.max(0, n(g.deckPlaytime) || 0),
+    lastPlayed: n(g.lastPlayed) || 0,
+    deck: [0, 1, 2, 3].includes(g.deck) ? g.deck : 0,
+    hltb: h && (h.main || h.extra) ? h : null,
+    genres: Array.isArray(g.genres) ? g.genres.filter((x) => typeof x === "string").slice(0, 6) : [],
+    metacritic: n(g.metacritic),
+    year: n(g.year),
+    controller: g.controller === "full" || g.controller === "partial" ? g.controller : null,
+  };
+}
+const playState = (g) => (g.playtime === 0 ? "never" : g.playtime < TRIED_MIN ? "tried" : "played");
+const mainH = (g) => (g.hltb && (g.hltb.main || g.hltb.extra)) || null;
+function lenBucket(g) {
+  const h = mainH(g);
+  if (!h) return "none";
+  return h < 5 ? "short" : h < 15 ? "mid" : h < 40 ? "long" : "epic";
+}
+function currentTriage() { return S.source === "db" || S.source === "server" ? S.triage : S.sampleTriage; }
+function lane(g) { return currentTriage().get(g.appid) || ""; }
+const isClosed = (g) => ["skip", "done"].includes(lane(g));
+const inBacklog = (g) => playState(g) !== "played" && !isClosed(g);
+
+function score(g) {
+  let s = 0;
+  const st = playState(g);
+  s += st === "never" ? 30 : st === "tried" ? 22 : -20;
+  s += { 3: 30, 2: 14, 0: 0, 1: -45 }[g.deck];
+  const h = mainH(g);
+  if (h) s += h <= 5 ? 24 : h <= 12 ? 18 : h <= 25 ? 9 : h <= 50 ? 0 : -10;
+  if (g.metacritic) s += (g.metacritic - 75) / 2;
+  if (g.deckPlaytime > 0) s += 5;
+  if (g.controller === "full") s += 4;
+  if (lane(g) === "next") s += 100;
+  return s;
+}
+
+function fmtMin(m) {
+  if (!m) return "Never launched";
+  if (m < 60) return `${m} min`;
+  const h = m / 60;
+  return `${h < 10 ? h.toFixed(1) : Math.round(h)} h`;
+}
+function fmtH(h) { return h < 10 ? (Math.round(h * 2) / 2).toString().replace(/\.0$/, "") : Math.round(h).toString(); }
+function ago(ts) {
+  if (!ts) return "";
+  const d = (Date.now() / 1000 - ts) / 86400;
+  if (d < 1) return "today";
+  if (d < 14) return `${Math.round(d)} d ago`;
+  if (d < 60) return `${Math.round(d / 7)} wk ago`;
+  if (d < 365) return `${Math.round(d / 30)} mo ago`;
+  return `${(d / 365).toFixed(d < 3650 ? 1 : 0).replace(/\.0$/, "")} yr ago`;
+}
+function deckBadge(d) { return `<span class="deck d${d}"><i aria-hidden="true">${DECK[d].icon}</i>${DECK[d].label}</span>`; }
+function lenBar(g, maxH = 60) {
+  const h = g.hltb;
+  if (!h || !(h.main || h.extra)) return `<span class="g-meta">No HLTB data</span>`;
+  const m = h.main || h.extra, x = Math.max(h.extra || 0, m);
+  const scale = (v) => Math.min(100, (Math.log1p(v) / Math.log1p(maxH)) * 100);
+  const w1 = scale(m), w2 = Math.max(0, scale(x) - w1);
+  return `<div class="lenbar"><div class="track" aria-hidden="true"><span style="width:${w1.toFixed(1)}%"></span>${w2 > 0.5 ? `<span class="x" style="width:${w2.toFixed(1)}%"></span>` : ""}</div><small class="num">${fmtH(m)}h story${h.extra ? ` · ${fmtH(h.extra)}h extras` : ""}</small></div>`;
+}
+function laneButtons(g, compact) {
+  const cur = lane(g);
+  const set = compact ? LANES.filter((l) => l.k === "next" || l.k === "skip" || l.k === cur) : LANES;
+  return `<div class="lanes" role="group" aria-label="Triage ${esc(g.name)}">${set.map((l) => `<button type="button" data-appid="${g.appid}" data-lane="${l.k}" aria-pressed="${cur === l.k}">${l.label}</button>`).join("")}</div>`;
+}
+function reasons(g) {
+  const out = [];
+  const st = playState(g);
+  if (lane(g) === "next") out.push(["Marked next", true]);
+  out.push([st === "never" ? "Never launched" : st === "tried" ? `Tried for ${fmtMin(g.playtime)}` : `${fmtMin(g.playtime)} played`, false]);
+  if (g.deckPlaytime > 0) out.push(["Played on Deck", false]);
+  if (g.metacritic >= 85) out.push([`Metacritic ${g.metacritic}`, false]);
+  if (g.controller === "full") out.push(["Full controller support", false]);
+  return out;
+}
+
+// ---------------------------------------------------------------- library
+function setLibrary(games, source, meta) {
+  S.games = games;
+  S.byId = new Map(games.map((g) => [g.appid, g]));
+  S.source = source;
+  S.meta = meta || null;
+  S.shown = PAGE;
+  render();
+}
+
+// ---------------------------------------------------------------- render
+function render() {
+  renderHeader();
+  renderOverview();
+  renderPicks();
+  renderAsk();
+  renderList();
+}
+
+function renderHeader() {
+  const G = S.games;
+  const never = G.filter((g) => g.playtime === 0).length;
+  const quick = G.filter((g) => inBacklog(g) && g.deck === 3 && mainH(g) && mainH(g) < 15).length;
+  const next = G.filter((g) => lane(g) === "next").length;
+  $("headline").innerHTML = `<b class="num">${G.length.toLocaleString()}</b> games, <b class="num">${never.toLocaleString()}</b> never launched. <b class="num">${quick}</b> backlog games are Deck Verified and under 15 hours${next ? `, and <b class="num">${next}</b> ${next === 1 ? "is" : "are"} marked up next` : ""}.`;
+  $("sampleBanner").hidden = S.source !== "sample";
+  if (S.server && S.source === "sample") {
+    $("bannerText").innerHTML = "<strong>No export on this server yet.</strong> This is a sample library until the scheduled export runs, or run <code>run-export.sh</code> on the server now. Triage marks on sample games aren't saved.";
+    $("showHowto").hidden = true;
+  }
+  $("who").textContent = S.source === "sample" ? "Sample library" : (S.meta && S.meta.persona) ? `${S.meta.persona}'s Steam library` : "Your Steam library";
+  let line = "";
+  if (S.source !== "sample" && S.meta && S.meta.exportedAt) {
+    const d = new Date(S.meta.exportedAt);
+    line = `Exported ${d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+    if (S.source === "local") line += ". Only loaded in this tab (it couldn't be saved with the page)";
+    if (S.source === "server") line += " · refreshed weekly on the server";
+  }
+  $("sourceLine").textContent = line;
+}
+
+function renderOverview() {
+  const G = S.games;
+  const counts = { never: 0, tried: 0, played: 0 };
+  G.forEach((g) => counts[playState(g)]++);
+  const total = G.length || 1;
+  const seg = [
+    { k: "never", label: "Never launched", color: "var(--accent)" },
+    { k: "tried", label: "Tried (<2h)", color: "color-mix(in oklab, var(--accent) 55%, var(--surface-2))" },
+    { k: "played", label: "Played 2h+", color: "color-mix(in oklab, var(--accent) 22%, var(--surface-2))" },
+  ];
+  $("stack").innerHTML = seg.filter((s) => counts[s.k]).map((s) =>
+    `<span style="flex:${counts[s.k]};background:${s.color}" data-tip="${esc(s.label)}: ${counts[s.k]} games (${Math.round((counts[s.k] / total) * 100)}%)"></span>`).join("");
+  $("stack").setAttribute("aria-label", seg.map((s) => `${s.label} ${counts[s.k]}`).join(", "));
+  $("legend").innerHTML = seg.map((s) =>
+    `<div><span class="k"><i style="background:${s.color}"></i>${s.label}</span><span class="v num">${counts[s.k].toLocaleString()}</span></div>`).join("");
+  const dc = { 0: 0, 1: 0, 2: 0, 3: 0 };
+  G.forEach((g) => dc[g.deck]++);
+  $("deckline").innerHTML = DECK_ORDER.map((d) => `<span>${deckBadge(d)} <span class="num">${dc[d]}</span></span>`).join("");
+
+  // Heatmap
+  const cells = {};
+  let max = 0;
+  G.forEach((g) => {
+    if (!inBacklog(g)) return;
+    const key = g.deck + "|" + lenBucket(g);
+    cells[key] = (cells[key] || 0) + 1;
+    max = Math.max(max, cells[key]);
+  });
+  const f = S.f;
+  let html = `<thead><tr><th class="rowh"><span class="sr">Deck rating</span></th>${LEN.map((l) => `<th scope="col">${l.label}</th>`).join("")}</tr></thead><tbody>`;
+  DECK_ORDER.forEach((d) => {
+    html += `<tr><th scope="row" class="rowh">${deckBadge(d)}</th>`;
+    LEN.forEach((l) => {
+      const n = cells[d + "|" + l.k] || 0;
+      const sel = f.view === "backlog" && f.len === l.k && f.deck.length === 1 && f.deck[0] === d;
+      if (!n) {
+        html += `<td><div class="cell zero" style="background:var(--surface-2)" aria-label="${DECK[d].label}, ${l.label}: none">·</div></td>`;
+      } else {
+        const p = 0.18 + 0.82 * Math.sqrt(n / max);
+        const fg = p > 0.55 ? "#fff" : "var(--ink)";
+        html += `<td><button type="button" class="cell${sel ? " sel" : ""}" data-deck="${d}" data-len="${l.k}" style="background:color-mix(in oklab, var(--accent) ${(p * 100).toFixed(0)}%, var(--surface-2));color:${fg}" data-tip="${n} backlog game${n === 1 ? "" : "s"}: ${DECK[d].label}, ${l.label.toLowerCase()}. Click to filter." aria-label="${n} backlog games, ${DECK[d].label}, ${l.label}">${n}</button></td>`;
+      }
+    });
+    html += `</tr>`;
+  });
+  $("heat").innerHTML = html + "</tbody>";
+}
+
+function pickCard(g, i, why) {
+  const chips = reasons(g).map(([t, hl]) => `<span class="chip${hl ? " hl" : ""}">${esc(t)}</span>`).join("");
+  return `<article class="pick">
+    <div class="pick-top"><span class="rank num">#${i + 1}</span>${deckBadge(g.deck)}</div>
+    <h3><a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${esc(g.name)}</a></h3>
+    ${why ? `<p class="why">${esc(why)}</p>` : ""}
+    ${lenBar(g)}
+    <div class="chips">${chips}</div>
+    <div class="spacer"></div>
+    ${laneButtons(g, false)}
+  </article>`;
+}
+
+function renderPicks() {
+  const top = S.games.filter(inBacklog).sort((a, b) => score(b) - score(a)).slice(0, 6);
+  $("picks").innerHTML = top.length ? top.map((g, i) => pickCard(g, i)).join("") :
+    `<div class="panel" style="grid-column:1/-1"><p>Nothing left in the backlog. Everything is played, skipped or finished.</p></div>`;
+}
+
+function filtered() {
+  const f = S.f, q = f.q.trim().toLowerCase();
+  let out = S.games.filter((g) => {
+    const ln = lane(g), st = playState(g);
+    switch (f.view) {
+      case "backlog": if (!inBacklog(g)) return false; break;
+      case "next": if (ln !== "next") return false; break;
+      case "someday": if (ln !== "someday") return false; break;
+      case "played": if (st !== "played" || isClosed(g)) return false; break;
+      case "closed": if (!isClosed(g)) return false; break;
+    }
+    if (f.len && lenBucket(g) !== f.len) return false;
+    if (f.deck.length && !f.deck.includes(g.deck)) return false;
+    if (q && !(g.name.toLowerCase().includes(q) || g.genres.some((x) => x.toLowerCase().includes(q)))) return false;
+    return true;
+  });
+  const cmp = {
+    score: (a, b) => score(b) - score(a),
+    short: (a, b) => (mainH(a) || 1e9) - (mainH(b) || 1e9),
+    name: (a, b) => a.name.localeCompare(b.name),
+    recent: (a, b) => b.lastPlayed - a.lastPlayed,
+    most: (a, b) => b.playtime - a.playtime,
+    mc: (a, b) => (b.metacritic || 0) - (a.metacritic || 0),
+  }[f.sort] || ((a, b) => score(b) - score(a));
+  return out.sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
+}
+
+function renderList() {
+  const f = S.f;
+  $("q").value = f.q; $("view").value = f.view; $("len").value = f.len; $("sort").value = f.sort;
+  $("deckSeg").innerHTML = DECK_ORDER.map((d) =>
+    `<button type="button" data-deckf="${d}" aria-pressed="${f.deck.includes(d)}"><i style="background:var(--${["unk", "crit", "warn", "good"][d]})"></i>${DECK[d].label}</button>`).join("");
+  const rows = filtered();
+  const vis = rows.slice(0, S.shown);
+  const filtersOn = f.q || f.len || f.deck.length || f.view !== "backlog";
+  $("clearBtn").hidden = !filtersOn;
+  $("countLine").textContent = `Showing ${vis.length.toLocaleString()} of ${rows.length.toLocaleString()} ${rows.length === 1 ? "game" : "games"}`;
+  let html = `<div class="row head"><span>Game</span><span>Played</span><span>Deck</span><span>Length (HLTB)</span><span>Triage</span></div>`;
+  if (!vis.length) html += `<div class="empty">No games match these filters.</div>`;
+  html += vis.map((g) => {
+    const meta = [g.genres.slice(0, 3).join(", "), g.year, g.metacritic ? `MC ${g.metacritic}` : ""].filter(Boolean).join(" · ");
+    const la = ago(g.lastPlayed);
+    return `<div class="row">
+      <div class="g-name"><a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" rel="noopener">${esc(g.name)}</a>${meta ? `<span class="g-meta">${esc(meta)}</span>` : ""}</div>
+      <div class="g-play num">${fmtMin(g.playtime)}${g.deckPlaytime ? `<small>${fmtMin(g.deckPlaytime)} on Deck</small>` : ""}${la && g.playtime ? `<small>${la}</small>` : ""}</div>
+      <div class="g-deck">${deckBadge(g.deck)}</div>
+      <div class="g-len">${lenBar(g)}</div>
+      <div class="g-lanes">${laneButtons(g, false)}</div>
+    </div>`;
+  }).join("");
+  if (rows.length > vis.length) html += `<div class="more"><button class="btn" type="button" id="moreBtn">Show ${Math.min(PAGE, rows.length - vis.length)} more</button></div>`;
+  $("list").innerHTML = html;
+}
+
+// ---------------------------------------------------------------- interactions
+let qTimer;
+$("q").addEventListener("input", (e) => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.f.q = e.target.value; S.shown = PAGE; renderList(); }, 120); });
+$("view").addEventListener("change", (e) => { S.f.view = e.target.value; S.shown = PAGE; saveFilters(); renderList(); renderOverview(); });
+$("len").addEventListener("change", (e) => { S.f.len = e.target.value; S.shown = PAGE; saveFilters(); renderList(); renderOverview(); });
+$("sort").addEventListener("change", (e) => { S.f.sort = e.target.value; saveFilters(); renderList(); });
+$("clearBtn").addEventListener("click", () => { S.f = { q: "", view: "backlog", len: "", sort: S.f.sort, deck: [] }; S.shown = PAGE; saveFilters(); renderList(); renderOverview(); });
+$("showHowto").addEventListener("click", () => { $("howto").open = true; $("howto").scrollIntoView({ behavior: "smooth", block: "start" }); });
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button");
+  if (!t) return;
+  if (t.dataset.lane) { setLane(Number(t.dataset.appid), t.dataset.lane); return; }
+  if (t.dataset.deckf !== undefined) {
+    const d = Number(t.dataset.deckf);
+    S.f.deck = S.f.deck.includes(d) ? S.f.deck.filter((x) => x !== d) : [...S.f.deck, d];
+    S.shown = PAGE; saveFilters(); renderList(); renderOverview(); return;
+  }
+  if (t.classList.contains("cell") && t.dataset.deck !== undefined) {
+    const d = Number(t.dataset.deck), l = t.dataset.len;
+    const same = S.f.view === "backlog" && S.f.len === l && S.f.deck.length === 1 && S.f.deck[0] === d;
+    S.f = { ...S.f, view: "backlog", len: same ? "" : l, deck: same ? [] : [d] };
+    S.shown = PAGE; saveFilters(); renderOverview(); renderList();
+    if (!same) $("listH").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (t.id === "moreBtn") { S.shown += PAGE; renderList(); return; }
+  if (t.dataset.copy !== undefined) { copyText(t.dataset.copy, t); return; }
+});
+
+function copyText(text, btn) {
+  const done = () => { const o = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = o), 1400); };
+  try {
+    navigator.clipboard.writeText(text).then(done, () => selectCode(btn));
+  } catch (e) { selectCode(btn); }
+}
+function selectCode(btn) {
+  const code = btn.parentElement.querySelector("code");
+  const r = document.createRange(); r.selectNodeContents(code);
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  toast("Selected. Press Ctrl+C or ⌘C to copy.");
+}
+
+// Tooltip
+const tip = $("tip");
+function placeTip(x, y) {
+  const r = tip.getBoundingClientRect();
+  let left = x + 14, top = y + 14;
+  if (left + r.width > innerWidth - 8) left = x - r.width - 14;
+  if (top + r.height > innerHeight - 8) top = y - r.height - 14;
+  tip.style.left = Math.max(8, left) + "px"; tip.style.top = Math.max(8, top) + "px";
+}
+document.addEventListener("pointermove", (e) => {
+  const el = e.target.closest && e.target.closest("[data-tip]");
+  if (!el) { tip.hidden = true; return; }
+  tip.textContent = el.dataset.tip; tip.hidden = false; placeTip(e.clientX, e.clientY);
+});
+document.addEventListener("focusin", (e) => {
+  const el = e.target.closest && e.target.closest("[data-tip]");
+  if (!el) { tip.hidden = true; return; }
+  const r = el.getBoundingClientRect();
+  tip.textContent = el.dataset.tip; tip.hidden = false; placeTip(r.left + r.width / 2, r.bottom);
+});
+document.addEventListener("focusout", () => (tip.hidden = true));
+document.addEventListener("scroll", () => (tip.hidden = true), { passive: true });
+
+let toastTimer;
+function toast(msg, ms = 3200) {
+  const t = $("toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms);
+}
+
+// ---------------------------------------------------------------- triage persistence
+const queues = new Map();
+function setLane(appid, laneKey) {
+  const map = currentTriage();
+  const prev = map.get(appid) || "";
+  const next = prev === laneKey ? "" : laneKey;
+  if (next) map.set(appid, next); else map.delete(appid);
+  render();
+  if (S.source === "server") {
+    const job = (queues.get("server") || Promise.resolve()).then(async () => {
+      const r = await fetch("api/triage", { method: "PUT", headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ appid, lane: next }) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+    }).catch(() => {
+      if (prev) map.set(appid, prev); else map.delete(appid);
+      render();
+      toast("Couldn't save that change to the server. Try again in a moment.");
+    });
+    queues.set("server", job);
+    return;
+  }
+  if (S.source !== "db" || !S.db) return;
+  const b = "b" + (appid % 64);
+  const job = (queues.get(b) || Promise.resolve()).then(() => writeLane(b, appid, next)).catch((err) => {
+    if (prev) map.set(appid, prev); else map.delete(appid);
+    render();
+    toast(err && err.code === "invalid_argument" ? "You can view this dashboard but not change it." : "Couldn't save that change. Try again in a moment.");
+  });
+  queues.set(b, job);
+}
+async function writeLane(bucket, appid, laneKey) {
+  const ref = S.db.doc("triage/" + bucket);
+  const body = { [String(appid)]: { lane: laneKey, at: Date.now() } };
+  if (S.bucketExists.has(bucket)) await ref.update(body);
+  else { const snap = await ref.get(); if (snap.exists) await ref.update(body); else await ref.set(body); S.bucketExists.add(bucket); }
+}
+
+// ---------------------------------------------------------------- import
+$("loadBtn").addEventListener("click", () => $("fileInput").click());
+$("fileInput").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); }
+  catch (err) { toast("That file isn't valid JSON. Pick the steam_backlog.json the exporter wrote."); return; }
+  if (!data || !Array.isArray(data.games) || !data.games.every((g) => g && Number.isFinite(Number(g.appid)))) {
+    toast("That file doesn't look like an export from steam_backlog_export.py."); return;
+  }
+  const games = data.games.map(normalize);
+  const meta = { exportedAt: data.exportedAt || new Date().toISOString(), persona: data.persona || null, steamid: data.steamid || null };
+  if (S.server) {
+    try {
+      const r = await fetch("api/library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      setLibrary(games, "server", meta);
+      toast(`Saved ${games.length.toLocaleString()} games to the server.`);
+    } catch (err) {
+      setLibrary(games, "local", meta);
+      toast("Couldn't save to the server, so the library is only loaded in this tab.");
+    }
+    return;
+  }
+  if (!S.db) {
+    setLibrary(games, "local", meta);
+    toast(`Loaded ${games.length} games for this visit.`);
+    return;
+  }
+  setLibrary(games, "db", meta);
+  await saveLibrary(games, meta);
+});
+
+async function saveLibrary(games, meta) {
+  const db = S.db, btn = $("loadBtn");
+  btn.disabled = true;
+  const version = Date.now();
+  const n = Math.ceil(games.length / CHUNK) || 1;
+  try {
+    const old = await db.collection("chunks").limit(1000).get();
+    for (let i = 0; i < n; i++) {
+      toast(`Saving your library… ${i + 1}/${n}`, 60000);
+      await db.doc("chunks/c" + String(i).padStart(3, "0")).set({ i, v: version, games: games.slice(i * CHUNK, (i + 1) * CHUNK) });
+    }
+    S.loadedVersion = version;
+    await db.doc("library/meta").set({ ...meta, version, chunks: n, count: games.length, importedAt: new Date().toISOString() });
+    const keep = new Set(Array.from({ length: n }, (_, i) => "c" + String(i).padStart(3, "0")));
+    for (const d of old.docs) if (!keep.has(d.id)) await db.doc("chunks/" + d.id).delete();
+    toast(`Saved ${games.length.toLocaleString()} games. They'll load automatically next time.`);
+  } catch (err) {
+    S.source = "local"; renderHeader();
+    toast(err && err.code === "invalid_argument" ? "You can view this dashboard but not change its library." :
+      err && err.code === "quota_exceeded" ? "The page's storage is full, so the library is only loaded for this visit." :
+      "Couldn't save the library, so it's only loaded for this visit. Try loading it again.", 6000);
+  } finally { btn.disabled = false; }
+}
+
+// ---------------------------------------------------------------- db boot
+async function loadFromDb(meta, tries = 0) {
+  const q = await S.db.collection("chunks").limit(1000).get();
+  const parts = q.docs.map((d) => d.data()).filter((d) => d.v === meta.version).sort((a, b) => a.i - b.i);
+  if (parts.length !== meta.chunks) {
+    if (tries < 4) setTimeout(() => loadFromDb(meta, tries + 1), 1500 * (tries + 1));
+    return;
+  }
+  S.loadedVersion = meta.version;
+  setLibrary(parts.flatMap((p) => p.games || []).map(normalize), "db", meta);
+}
+
+async function bootDb() {
+  let db = null;
+  try { db = await window.claude?.use?.("db"); } catch (e) { db = null; }
+  if (!db) return;
+  S.db = db;
+  db.doc("library/meta").onSnapshot((snap) => {
+    if (!snap.exists) return;
+    const m = snap.data();
+    if (m.version === S.loadedVersion && S.source === "db") { S.meta = m; renderHeader(); return; }
+    loadFromDb(m).catch(() => {});
+  }, () => {});
+  db.collection("triage").onSnapshot((snap) => {
+    const map = new Map();
+    S.bucketExists = new Set(snap.docs.map((d) => d.id));
+    snap.docs.forEach((d) => {
+      const body = d.data() || {};
+      for (const [k, v] of Object.entries(body)) if (v && v.lane) map.set(Number(k), v.lane);
+    });
+    S.triage = map;
+    if (S.source === "db") render();
+  }, () => {});
+}
+
+// ---------------------------------------------------------------- ask Claude
+async function bootSample() {
+  let sample = null;
+  try { sample = await window.claude?.use?.("sample"); } catch (e) { sample = null; }
+  if (!sample) return;
+  $("askPanel").hidden = false;
+  let ctrl = null;
+  $("askForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const mood = $("askMood").value.trim() || "Something good to start tonight";
+    const time = $("askTime").value;
+    const cands = S.games.filter(inBacklog).filter((g) => g.deck !== 1).sort((a, b) => score(b) - score(a)).slice(0, 90);
+    if (cands.length < 3) { showAsk(`<p class="ask-status">There aren't enough backlog games left to choose from.</p>`); return; }
+    const lines = cands.map((g) => [g.appid, g.name, DECK[g.deck].label, mainH(g) ? fmtH(mainH(g)) + "h" : "?", g.playtime + "min", g.genres.join("/") || "-", g.metacritic || "-"].join(" | ")).join("\n");
+    const prompt = `You are helping someone choose what to play from their Steam backlog on a Steam Deck.\nWhat they want: "${mood}"\nTime they have: ${time}\n\nCandidates, one per line: id | name | Steam Deck rating | HowLongToBeat main-story hours | minutes already played | genres | Metacritic\n${lines}\n\nPick exactly 3 different games from the candidates that best fit what they want and the time they have. Use your own knowledge of each game's feel and pacing. Prefer Verified over Playable when the fit is otherwise close.\nReply with JSON only: {"picks":[{"id":<id number>,"why":"<one sentence, at most 24 words, specific to this game and their request>"}]}`;
+    if (ctrl) ctrl.abort();
+    ctrl = new AbortController();
+    $("askBtn").disabled = true;
+    showAsk(`<p class="ask-status">Claude is looking through ${cands.length} backlog games…</p>`);
+    try {
+      const res = await sample.json(prompt, { modelTier: "quick", signal: ctrl.signal });
+      const ids = new Set(cands.map((g) => g.appid));
+      const picks = (res && Array.isArray(res.picks) ? res.picks : []).filter((p) => ids.has(Number(p.id))).slice(0, 3);
+      if (!picks.length) { showAsk(`<p class="ask-status">Claude's answer didn't include games from your library. Try rewording the request.</p>`); return; }
+      S.ask = { mood, time, picks: picks.map((p) => ({ id: Number(p.id), why: String(p.why || "") })) };
+      renderAsk();
+    } catch (err) {
+      if (err && err.code === "cancelled") return;
+      if (err && err.code === "not_granted") { $("askPanel").hidden = true; return; }
+      showAsk(`<p class="ask-status">${err && err.code === "rate_limited" ? "Too many requests just now. Wait a minute and try again." : "Claude couldn't answer just now. Try again in a moment."}</p>`);
+    } finally { $("askBtn").disabled = false; }
+  });
+}
+function showAsk(html) { S.ask = null; const o = $("askOut"); o.innerHTML = html; o.hidden = false; }
+function renderAsk() {
+  if (!S.ask) return;
+  const { mood, time, picks } = S.ask;
+  const games = picks.map((p) => [S.byId.get(p.id), p.why]).filter(([g]) => g);
+  const o = $("askOut");
+  o.innerHTML = `<p class="ask-status">For “${esc(mood)}” · ${esc(time.toLowerCase())}</p><div class="picks">${games.map(([g, why], i) => pickCard(g, i, why)).join("")}</div>`;
+  o.hidden = false;
+}
+
+// ---------------------------------------------------------------- start
+// ---------------------------------------------------------------- self-hosted mode
+// When served by backlog_server.py, the library and triage marks come from its small API.
+// On claude.ai these requests simply fail, and the page falls back to the artifact database.
+async function bootServer() {
+  let r;
+  try { r = await fetch("api/library", { cache: "no-store" }); } catch (e) { return false; }
+  if (!r.headers.get("X-Backlog-Server")) return false;
+  S.server = true;
+  // Optional header links, configured on the server with --nav LABEL=URL.
+  const links = ((window.APP_CONFIG || {}).nav || []).filter((l) => l && l.label && l.url);
+  if (links.length) {
+    $("pagesNav").innerHTML = `<a href="./" aria-current="page">Backlog</a>` +
+      links.map((l) => `<a href="${esc(l.url)}">${esc(l.label)}</a>`).join("");
+    $("pagesNav").hidden = false;
+  }
+  try {
+    const t = await fetch("api/triage", { cache: "no-store" });
+    if (t.ok) S.triage = new Map(Object.entries(await t.json()).map(([k, v]) => [Number(k), v]));
+  } catch (e) {}
+  if (r.ok) {
+    const data = await r.json();
+    setLibrary((data.games || []).map(normalize), "server",
+               { exportedAt: data.exportedAt, persona: data.persona, steamid: data.steamid });
+  } else {
+    renderHeader();
+  }
+  return true;
+}
+
+setLibrary(sampleGames(), "sample", null);
+bootServer().then((isServer) => { if (!isServer) { bootDb(); bootSample(); } });
+})();
+</script>
+

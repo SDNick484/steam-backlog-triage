@@ -1,0 +1,19 @@
+# Dashboard web server. Copy to /etc/systemd/system/, adjust paths/user, then:
+#   systemctl daemon-reload && systemctl enable --now backlog-triage
+[Unit]
+Description=Steam Backlog Triage dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=steam
+ExecStart=/usr/bin/python3 /opt/steam-backlog-triage/backlog_server.py --port 8484 --data /home/steam/exports
+# Optional header link to another page:
+# ExecStart=/usr/bin/python3 /opt/steam-backlog-triage/backlog_server.py --port 8484 --data /home/steam/exports --nav "Deals=https://deals.example.com/"
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/steam/exports
+
+[Install]
+WantedBy=multi-user.target

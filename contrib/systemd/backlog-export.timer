@@ -1,0 +1,11 @@
+# Weekly export. Enable with: systemctl enable --now backlog-export.timer
+[Unit]
+Description=Weekly Steam library export for Backlog Triage
+
+[Timer]
+OnCalendar=Mon *-*-* 04:15:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

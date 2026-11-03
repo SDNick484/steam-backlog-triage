@@ -1,0 +1,10 @@
+# One export run; triggered by backlog-export.timer.
+[Unit]
+Description=Steam library export for Backlog Triage
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=steam
+ExecStart=/opt/steam-backlog-triage/run-export.sh
