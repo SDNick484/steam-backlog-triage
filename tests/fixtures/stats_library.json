@@ -1,0 +1,1191 @@
+{
+ "schema": 2,
+ "source": "steam_backlog_export.py",
+ "exportedAt": "2026-11-01T08:00:00+00:00",
+ "steamid": "7656119XXXXXXXXXX",
+ "persona": "Fixture Persona",
+ "games": [
+  {
+   "appid": 910000,
+   "name": "Fixture Game 01",
+   "playtime": 119,
+   "deckPlaytime": 59,
+   "lastPlayed": 1700000000,
+   "deck": 3,
+   "hltb": {
+    "main": 60.0,
+    "extra": 80.0,
+    "complete": 120.0
+   },
+   "genres": [],
+   "metacritic": 45,
+   "year": 2019,
+   "controller": null,
+   "proton": null
+  },
+  {
+   "appid": 910001,
+   "name": "Fixture Game 02",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 0,
+   "hltb": {
+    "main": 22.0,
+    "extra": 30.0,
+    "complete": 55.0
+   },
+   "genres": [],
+   "metacritic": null,
+   "year": 2008,
+   "controller": "partial",
+   "proton": {
+    "tier": "bronze",
+    "total": 710
+   }
+  },
+  {
+   "appid": 910002,
+   "name": "Fixture Game 03",
+   "playtime": 119,
+   "deckPlaytime": 59,
+   "lastPlayed": 1700000002,
+   "deck": 3,
+   "hltb": {
+    "main": null,
+    "extra": 7.0,
+    "complete": null
+   },
+   "genres": [
+    "RPG",
+    "Action"
+   ],
+   "metacritic": 69,
+   "year": 2014,
+   "controller": "partial",
+   "proton": {
+    "tier": "gold",
+    "total": 114
+   }
+  },
+  {
+   "appid": 910003,
+   "name": "Fixture Game 04",
+   "playtime": 600,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000003,
+   "deck": 3,
+   "hltb": null,
+   "genres": [
+    "RPG",
+    "Action"
+   ],
+   "metacritic": 90,
+   "year": 2014,
+   "controller": null,
+   "proton": {
+    "tier": "borked",
+    "total": 395
+   }
+  },
+  {
+   "appid": 910004,
+   "name": "Fixture Game 05",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 3,
+   "hltb": null,
+   "genres": [
+    "Adventure"
+   ],
+   "metacritic": 60,
+   "year": 2011,
+   "controller": null,
+   "proton": {
+    "tier": "native",
+    "total": 689
+   }
+  },
+  {
+   "appid": 910005,
+   "name": "Fixture Game 06",
+   "playtime": 119,
+   "deckPlaytime": 59,
+   "lastPlayed": 1700000005,
+   "deck": 0,
+   "hltb": {
+    "main": 60.0,
+    "extra": 80.0,
+    "complete": 120.0
+   },
+   "genres": [
+    "RPG",
+    "Indie"
+   ],
+   "metacritic": 90,
+   "year": 2020,
+   "controller": "partial",
+   "proton": {
+    "tier": "gold",
+    "total": 238
+   }
+  },
+  {
+   "appid": 910006,
+   "name": "Fixture Game 07",
+   "playtime": 120,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000006,
+   "deck": 2,
+   "hltb": {
+    "main": 22.0,
+    "extra": 30.0,
+    "complete": 55.0
+   },
+   "genres": [],
+   "metacritic": 60,
+   "year": 2008,
+   "controller": null,
+   "proton": {
+    "tier": "silver",
+    "total": 14
+   },
+   "publishers": [
+    "Finji",
+    "Devolver Digital"
+   ],
+   "developers": [
+    "Studio Beta LLC"
+   ],
+   "reviews": {
+    "total": 40000,
+    "pct": 95,
+    "desc": "Mostly Negative"
+   }
+  },
+  {
+   "appid": 910007,
+   "name": "Fixture Game 08",
+   "playtime": 90,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000007,
+   "deck": 1,
+   "hltb": {
+    "main": 22.0,
+    "extra": 30.0,
+    "complete": 55.0
+   },
+   "genres": [],
+   "metacritic": 70,
+   "year": null,
+   "controller": "partial",
+   "proton": null,
+   "publishers": [
+    "Annapurna Interactive"
+   ],
+   "developers": [
+    "Studio Alpha Inc."
+   ],
+   "reviews": {
+    "total": 7,
+    "pct": 67,
+    "desc": "7 user reviews"
+   }
+  },
+  {
+   "appid": 910008,
+   "name": "Fixture Game 09",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 2,
+   "hltb": {
+    "main": 60.0,
+    "extra": 80.0,
+    "complete": 120.0
+   },
+   "genres": [],
+   "metacritic": 60,
+   "year": 1999,
+   "controller": null,
+   "proton": {
+    "tier": "pending",
+    "total": 280
+   },
+   "publishers": [
+    "Square Enix"
+   ],
+   "developers": [],
+   "reviews": {
+    "total": 400,
+    "pct": 15,
+    "desc": "Overwhelmingly Positive"
+   }
+  },
+  {
+   "appid": 910009,
+   "name": "Fixture Game 10",
+   "playtime": 30,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000009,
+   "deck": 2,
+   "hltb": null,
+   "genres": [
+    "Strategy",
+    "Indie"
+   ],
+   "metacritic": null,
+   "year": 2014,
+   "controller": "full",
+   "proton": {
+    "tier": "bronze",
+    "total": 410
+   },
+   "publishers": [
+    "Daedalic Entertainment GmbH"
+   ],
+   "developers": [
+    "Studio Beta LLC"
+   ],
+   "reviews": {
+    "total": 40000,
+    "pct": 95,
+    "desc": "Mostly Negative"
+   }
+  },
+  {
+   "appid": 910010,
+   "name": "Fixture Game 11",
+   "playtime": 30,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000010,
+   "deck": 1,
+   "hltb": {
+    "main": 60.0,
+    "extra": 80.0,
+    "complete": 120.0
+   },
+   "genres": [
+    "Action"
+   ],
+   "metacritic": 79,
+   "year": 2019,
+   "controller": "partial",
+   "proton": {
+    "tier": "borked",
+    "total": 454
+   },
+   "publishers": [
+    "DEVOLVER DIGITAL"
+   ],
+   "developers": [
+    "Studio Beta LLC"
+   ],
+   "reviews": {
+    "total": 400,
+    "pct": 75,
+    "desc": "Overwhelmingly Negative"
+   }
+  },
+  {
+   "appid": 910011,
+   "name": "Fixture Game 12",
+   "playtime": 600,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000011,
+   "deck": 1,
+   "hltb": null,
+   "genres": [
+    "Strategy"
+   ],
+   "metacritic": 79,
+   "year": 1999,
+   "controller": "partial",
+   "proton": {
+    "tier": "bronze",
+    "total": 884
+   },
+   "publishers": [
+    "Kalypso Media Digital"
+   ],
+   "developers": [],
+   "reviews": null
+  },
+  {
+   "appid": 910012,
+   "name": "Fixture Game 13",
+   "playtime": 120,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000012,
+   "deck": 1,
+   "hltb": null,
+   "genres": [
+    "Strategy",
+    "Action"
+   ],
+   "metacritic": 69,
+   "year": 2015,
+   "controller": "full",
+   "proton": {
+    "tier": "gold",
+    "total": 4
+   },
+   "publishers": [
+    "DEVOLVER DIGITAL"
+   ],
+   "developers": [
+    "Studio Gamma",
+    "Studio Delta"
+   ],
+   "reviews": {
+    "total": 40000,
+    "pct": 60,
+    "desc": "Overwhelmingly Negative"
+   }
+  },
+  {
+   "appid": 910013,
+   "name": "Fixture Game 14",
+   "playtime": 120,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000013,
+   "deck": 1,
+   "hltb": null,
+   "genres": [
+    "Puzzle"
+   ],
+   "metacritic": null,
+   "year": 2015,
+   "controller": "full",
+   "proton": {
+    "tier": "native",
+    "total": 548
+   },
+   "publishers": [
+    "Valve"
+   ],
+   "developers": [
+    "Valve"
+   ],
+   "reviews": null
+  },
+  {
+   "appid": 910014,
+   "name": "Fixture Game 15",
+   "playtime": 5,
+   "deckPlaytime": 2,
+   "lastPlayed": 1700000014,
+   "deck": 0,
+   "hltb": null,
+   "genres": [],
+   "metacritic": null,
+   "year": 2019,
+   "controller": "partial",
+   "proton": null,
+   "publishers": [
+    "Finji",
+    "Devolver Digital"
+   ],
+   "developers": [
+    "Studio Gamma",
+    "Studio Delta"
+   ],
+   "reviews": null
+  },
+  {
+   "appid": 910015,
+   "name": "Fixture Game 16",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 3,
+   "hltb": {
+    "main": 60.0,
+    "extra": 80.0,
+    "complete": 120.0
+   },
+   "genres": [],
+   "metacritic": 69,
+   "year": 2020,
+   "controller": "partial",
+   "proton": {
+    "tier": "borked",
+    "total": 668
+   },
+   "publishers": [
+    "Finji",
+    "Devolver Digital"
+   ],
+   "developers": [
+    "Studio Alpha"
+   ],
+   "reviews": null
+  },
+  {
+   "appid": 910016,
+   "name": "Fixture Game 17",
+   "playtime": 5,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000016,
+   "deck": 1,
+   "hltb": null,
+   "genres": [
+    "Action"
+   ],
+   "metacritic": 45,
+   "year": 2020,
+   "controller": null,
+   "proton": {
+    "tier": "gold",
+    "total": 439
+   },
+   "publishers": [
+    "Team17"
+   ],
+   "developers": [
+    "Studio Gamma",
+    "Studio Delta"
+   ],
+   "reviews": {
+    "total": 400,
+    "pct": 45,
+    "desc": "Mixed"
+   }
+  },
+  {
+   "appid": 910017,
+   "name": "Fixture Game 18",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 2,
+   "hltb": {
+    "main": null,
+    "extra": 7.0,
+    "complete": null
+   },
+   "genres": [
+    "Simulation",
+    "Adventure",
+    "Puzzle"
+   ],
+   "metacritic": 79,
+   "year": 2008,
+   "controller": "full",
+   "proton": {
+    "tier": null,
+    "total": 499
+   },
+   "publishers": [
+    ""
+   ],
+   "developers": [
+    "Studio Beta LLC"
+   ],
+   "reviews": {
+    "total": 40000,
+    "pct": 60,
+    "desc": "Negative"
+   }
+  },
+  {
+   "appid": 910018,
+   "name": "Fixture Game 19",
+   "playtime": 120,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000018,
+   "deck": 0,
+   "hltb": {
+    "main": null,
+    "extra": 7.0,
+    "complete": null
+   },
+   "genres": [
+    "Strategy",
+    "Adventure"
+   ],
+   "metacritic": 60,
+   "year": 2011,
+   "controller": "full",
+   "proton": {
+    "tier": "gold",
+    "total": 353
+   },
+   "publishers": [
+    "Devolver Digital Inc."
+   ],
+   "developers": [
+    "Studio Beta LLC"
+   ],
+   "reviews": {
+    "total": 3,
+    "pct": 67,
+    "desc": "3 user reviews"
+   }
+  },
+  {
+   "appid": 910019,
+   "name": "Fixture Game 20",
+   "playtime": 30,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000019,
+   "deck": 2,
+   "hltb": {
+    "main": 22.0,
+    "extra": 30.0,
+    "complete": 55.0
+   },
+   "genres": [
+    "Action",
+    "Simulation",
+    "Adventure"
+   ],
+   "metacritic": 80,
+   "year": 2014,
+   "controller": null,
+   "proton": {
+    "tier": "gold",
+    "total": 792
+   },
+   "publishers": [
+    "Valve"
+   ],
+   "developers": [],
+   "reviews": {
+    "total": 4000,
+    "pct": 60,
+    "desc": "Very Negative"
+   }
+  },
+  {
+   "appid": 910020,
+   "name": "Fixture Game 21",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 3,
+   "hltb": null,
+   "genres": [
+    "Adventure",
+    "Puzzle"
+   ],
+   "metacritic": 59,
+   "year": 2023,
+   "controller": "full",
+   "proton": {
+    "tier": "native",
+    "total": 356
+   },
+   "publishers": [
+    "Square Enix"
+   ],
+   "developers": [
+    "Studio Alpha"
+   ],
+   "reviews": {
+    "total": 40000,
+    "pct": 95,
+    "desc": "Very Positive"
+   }
+  },
+  {
+   "appid": 910021,
+   "name": "Fixture Game 22",
+   "playtime": 30,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000021,
+   "deck": 0,
+   "hltb": null,
+   "genres": [
+    "RPG",
+    "Action",
+    "Adventure"
+   ],
+   "metacritic": 80,
+   "year": null,
+   "controller": "full",
+   "proton": null,
+   "publishers": [
+    "Devolver Digital Inc."
+   ],
+   "developers": [
+    "Studio Alpha"
+   ],
+   "reviews": null
+  },
+  {
+   "appid": 910022,
+   "name": "Fixture Game 23",
+   "playtime": 600,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000022,
+   "deck": 3,
+   "hltb": null,
+   "genres": [
+    "Indie",
+    "Adventure"
+   ],
+   "metacritic": 96,
+   "year": 2020,
+   "controller": "full",
+   "proton": {
+    "tier": "native",
+    "total": 45
+   },
+   "publishers": [
+    "Devolver Digital"
+   ],
+   "developers": [
+    "Studio Gamma",
+    "Studio Delta"
+   ],
+   "reviews": null
+  },
+  {
+   "appid": 910023,
+   "name": "Fixture Game 24",
+   "playtime": 600,
+   "deckPlaytime": 300,
+   "lastPlayed": 1700000023,
+   "deck": 0,
+   "hltb": null,
+   "genres": [
+    "Puzzle"
+   ],
+   "metacritic": 89,
+   "year": 2023,
+   "controller": "partial",
+   "proton": {
+    "tier": "pending",
+    "total": 571
+   },
+   "publishers": [
+    "Devolver Digital Inc."
+   ],
+   "developers": [
+    "Studio Gamma",
+    "Studio Delta"
+   ],
+   "reviews": {
+    "total": 400,
+    "pct": 95,
+    "desc": "Overwhelmingly Negative"
+   }
+  },
+  {
+   "appid": 910024,
+   "name": "Fixture Game 25",
+   "playtime": 119,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000024,
+   "deck": 3,
+   "hltb": {
+    "main": null,
+    "extra": 7.0,
+    "complete": null
+   },
+   "genres": [
+    "Adventure"
+   ],
+   "metacritic": null,
+   "year": 2014,
+   "controller": "full",
+   "proton": {
+    "tier": "bronze",
+    "total": 237
+   },
+   "publishers": [
+    "Paradox Interactive AB"
+   ],
+   "developers": [
+    "Studio Alpha"
+   ],
+   "reviews": {
+    "total": 40000,
+    "pct": 30,
+    "desc": "Overwhelmingly Negative"
+   }
+  },
+  {
+   "appid": 910025,
+   "name": "Fixture Game 26",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 1,
+   "hltb": {
+    "main": 9.0,
+    "extra": 12.5,
+    "complete": 20.0
+   },
+   "genres": [],
+   "metacritic": 96,
+   "year": 2020,
+   "controller": "full",
+   "proton": {
+    "tier": "gold",
+    "total": 14
+   },
+   "publishers": [
+    "Daedalic Entertainment GmbH"
+   ],
+   "developers": [
+    "Studio Alpha Inc."
+   ],
+   "reviews": {
+    "total": 7,
+    "pct": 67,
+    "desc": "7 user reviews"
+   }
+  },
+  {
+   "appid": 910026,
+   "name": "Fixture Game 27",
+   "playtime": 90,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000026,
+   "deck": 2,
+   "hltb": {
+    "main": 9.0,
+    "extra": 12.5,
+    "complete": 20.0
+   },
+   "genres": [
+    "Action",
+    "Indie"
+   ],
+   "metacritic": 69,
+   "year": 2020,
+   "controller": "partial",
+   "proton": {
+    "tier": "bronze",
+    "total": 602
+   },
+   "publishers": [
+    "Paradox Interactive"
+   ],
+   "developers": [
+    "Studio Alpha Inc."
+   ],
+   "reviews": {
+    "total": 40000,
+    "pct": 15,
+    "desc": "Very Negative"
+   }
+  },
+  {
+   "appid": 910027,
+   "name": "Fixture Game 28",
+   "playtime": 3000,
+   "deckPlaytime": 1500,
+   "lastPlayed": 1700000027,
+   "deck": 0,
+   "hltb": {
+    "main": 3.5,
+    "extra": 5.0,
+    "complete": 8.0
+   },
+   "genres": [
+    "Adventure",
+    "Puzzle"
+   ],
+   "metacritic": 60,
+   "year": 2023,
+   "controller": "partial",
+   "proton": {
+    "tier": "silver",
+    "total": 466
+   },
+   "publishers": [
+    "Devolver Digital"
+   ],
+   "developers": [
+    "Valve"
+   ],
+   "reviews": null
+  },
+  {
+   "appid": 910028,
+   "name": "Fixture Game 29",
+   "playtime": 5,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000028,
+   "deck": 2,
+   "hltb": null,
+   "genres": [
+    "RPG"
+   ],
+   "metacritic": 45,
+   "year": 2014,
+   "controller": null,
+   "proton": null,
+   "publishers": [
+    "DEVOLVER DIGITAL"
+   ],
+   "developers": [
+    "Studio Gamma",
+    "Studio Delta"
+   ],
+   "reviews": {
+    "total": 400,
+    "pct": 45,
+    "desc": "Mostly Positive"
+   }
+  },
+  {
+   "appid": 910029,
+   "name": "Fixture Game 30",
+   "playtime": 600,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000029,
+   "deck": 3,
+   "hltb": {
+    "main": 3.5,
+    "extra": 5.0,
+    "complete": 8.0
+   },
+   "genres": [
+    "Adventure",
+    "Indie"
+   ],
+   "metacritic": 60,
+   "year": 2020,
+   "controller": "partial",
+   "proton": {
+    "tier": "pending",
+    "total": 379
+   },
+   "publishers": [],
+   "developers": [
+    "Studio Alpha"
+   ],
+   "reviews": {
+    "total": 40,
+    "pct": 95,
+    "desc": "Very Positive"
+   }
+  },
+  {
+   "appid": 910030,
+   "name": "Fixture Game 31",
+   "playtime": 600,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000030,
+   "deck": 3,
+   "hltb": null,
+   "genres": [
+    "Strategy",
+    "Puzzle",
+    "Indie"
+   ],
+   "metacritic": 69,
+   "year": 2008,
+   "controller": null,
+   "proton": {
+    "tier": "gold",
+    "total": 265
+   },
+   "publishers": [
+    ""
+   ],
+   "developers": [],
+   "reviews": {
+    "total": 40000,
+    "pct": 95,
+    "desc": "Mixed"
+   }
+  },
+  {
+   "appid": 910031,
+   "name": "Fixture Game 32",
+   "playtime": 600,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000031,
+   "deck": 0,
+   "hltb": {
+    "main": 3.5,
+    "extra": 5.0,
+    "complete": 8.0
+   },
+   "genres": [
+    "Puzzle",
+    "Simulation",
+    "RPG"
+   ],
+   "metacritic": null,
+   "year": 2008,
+   "controller": null,
+   "proton": {
+    "tier": null,
+    "total": 642
+   },
+   "publishers": [
+    "Team17"
+   ],
+   "developers": [
+    "Studio Alpha Inc."
+   ],
+   "reviews": {
+    "total": 40,
+    "pct": 15,
+    "desc": "Positive"
+   }
+  },
+  {
+   "appid": 910032,
+   "name": "Fixture Game 33",
+   "playtime": 90,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000032,
+   "deck": 3,
+   "hltb": {
+    "main": 3.5,
+    "extra": 5.0,
+    "complete": 8.0
+   },
+   "genres": [
+    "Strategy",
+    "Action",
+    "RPG"
+   ],
+   "metacritic": null,
+   "year": 2019,
+   "controller": null,
+   "proton": {
+    "tier": "platinum",
+    "total": 649
+   },
+   "publishers": [
+    "  Humble Games  "
+   ],
+   "developers": [
+    "Studio Gamma",
+    "Studio Delta"
+   ],
+   "reviews": {
+    "total": 400,
+    "pct": 85,
+    "desc": "Mostly Negative"
+   }
+  },
+  {
+   "appid": 910033,
+   "name": "Fixture Game 34",
+   "playtime": 90,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000033,
+   "deck": 0,
+   "hltb": null,
+   "genres": [
+    "Puzzle",
+    "Strategy"
+   ],
+   "metacritic": 79,
+   "year": 2014,
+   "controller": "partial",
+   "proton": {
+    "tier": "pending",
+    "total": 50
+   },
+   "publishers": [
+    "Team17 Digital Limited"
+   ],
+   "developers": [
+    "Valve"
+   ],
+   "reviews": {
+    "total": 4000,
+    "pct": 95,
+    "desc": "Overwhelmingly Negative"
+   }
+  },
+  {
+   "appid": 910034,
+   "name": "Fixture Game 35",
+   "playtime": 119,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000034,
+   "deck": 2,
+   "hltb": {
+    "main": null,
+    "extra": 7.0,
+    "complete": null
+   },
+   "genres": [
+    "Strategy"
+   ],
+   "metacritic": 79,
+   "year": 1999,
+   "controller": "partial",
+   "proton": {
+    "tier": "bronze",
+    "total": 123
+   },
+   "publishers": [],
+   "developers": [
+    "Studio Alpha"
+   ],
+   "reviews": null
+  },
+  {
+   "appid": 910035,
+   "name": "Fixture Game 36",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 0,
+   "hltb": null,
+   "genres": [
+    "Adventure"
+   ],
+   "metacritic": 45,
+   "year": 2014,
+   "controller": "partial",
+   "proton": null,
+   "publishers": [
+    "Daedalic Entertainment GmbH"
+   ],
+   "developers": [
+    "Studio Beta LLC"
+   ],
+   "reviews": {
+    "total": 400,
+    "pct": 45,
+    "desc": "Overwhelmingly Positive"
+   }
+  },
+  {
+   "appid": 910036,
+   "name": "Fixture Game 37",
+   "playtime": 600,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000036,
+   "deck": 3,
+   "hltb": null,
+   "genres": [],
+   "metacritic": 45,
+   "year": 1999,
+   "controller": "full",
+   "proton": {
+    "tier": "borked",
+    "total": 477
+   },
+   "publishers": [
+    "Valve"
+   ],
+   "developers": [
+    "Studio Beta LLC"
+   ],
+   "reviews": {
+    "total": 40,
+    "pct": 60,
+    "desc": "Overwhelmingly Positive"
+   }
+  },
+  {
+   "appid": 910037,
+   "name": "Fixture Game 38",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 1,
+   "hltb": {
+    "main": null,
+    "extra": 7.0,
+    "complete": null
+   },
+   "genres": [
+    "Puzzle",
+    "RPG"
+   ],
+   "metacritic": 70,
+   "year": 2015,
+   "controller": "partial",
+   "proton": {
+    "tier": null,
+    "total": 754
+   },
+   "publishers": [
+    "Finji",
+    "Devolver Digital"
+   ],
+   "developers": [
+    "Studio Alpha"
+   ],
+   "reviews": {
+    "total": 400,
+    "pct": 75,
+    "desc": "Positive"
+   }
+  },
+  {
+   "appid": 910038,
+   "name": "Fixture Game 39",
+   "playtime": 90,
+   "deckPlaytime": 0,
+   "lastPlayed": 1700000038,
+   "deck": 2,
+   "hltb": {
+    "main": 3.5,
+    "extra": 5.0,
+    "complete": 8.0
+   },
+   "genres": [],
+   "metacritic": 59,
+   "year": 1999,
+   "controller": "partial",
+   "proton": {
+    "tier": "native",
+    "total": 674
+   },
+   "publishers": [
+    "Kalypso Media Digital"
+   ],
+   "developers": [
+    "Studio Beta LLC"
+   ],
+   "reviews": {
+    "total": 40000,
+    "pct": 95,
+    "desc": "Negative"
+   }
+  },
+  {
+   "appid": 910039,
+   "name": "Fixture Game 40",
+   "playtime": 0,
+   "deckPlaytime": 0,
+   "lastPlayed": 0,
+   "deck": 0,
+   "hltb": {
+    "main": null,
+    "extra": 7.0,
+    "complete": null
+   },
+   "genres": [
+    "Simulation",
+    "Puzzle",
+    "Adventure"
+   ],
+   "metacritic": null,
+   "year": 2020,
+   "controller": "partial",
+   "proton": {
+    "tier": "platinum",
+    "total": 762
+   },
+   "publishers": [
+    "Square Enix"
+   ],
+   "developers": [
+    "Studio Alpha Inc."
+   ],
+   "reviews": {
+    "total": 40,
+    "pct": 75,
+    "desc": "Overwhelmingly Positive"
+   }
+  }
+ ]
+}

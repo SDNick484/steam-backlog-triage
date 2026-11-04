@@ -56,7 +56,8 @@ jobs:
             tests.test_exporter \
             tests.test_run_export \
             tests.test_privacy_scan \
-            tests.test_score_vectors 2>&1 | tee unittest.log
+            tests.test_score_vectors \
+            tests.test_stats 2>&1 | tee unittest.log
       - name: Fail if any test was skipped
         shell: bash
         run: |
@@ -65,7 +66,7 @@ jobs:
             exit 1
           fi
 
-  # backlog.html in a real browser, against backlog_server.py with a stub export.
+  # backlog.html in a real browser, against backlog_server.py with a stub export (and the 40-game stats fixture).
   page-smoke:
     name: Page smoke test (Chromium via Playwright)
     runs-on: ubuntu-latest
@@ -91,7 +92,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python -m unittest -v tests.browser.test_page 2>&1 | tee page.log
+          python -m unittest -v tests.browser.test_page tests.browser.test_filters 2>&1 | tee page.log
           if grep -Ei '\.\.\. skipped|skipped=' page.log; then echo "::error::a test was skipped"; exit 1; fi
 
   # install/alpine.sh twice (and a third time with one option changed) inside python:3.12-alpine, with apk, rc-*,

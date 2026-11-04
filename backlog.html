@@ -213,6 +213,8 @@ input::placeholder{color:var(--muted)}
 .fgroup select,.frow input[type=number]{width:100%;background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;padding:7px 9px;font-size:14px;color:var(--ink);min-width:0}
 .radio{display:flex;gap:12px;font-size:13px;color:var(--ink-2)}
 .fhint{font-size:12px;color:var(--muted)}
+.ftools{display:inline-flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.fgroup input[type=search]{padding:6px 9px;font-size:13px}
 .g-len .lenbar{gap:3px}
 .empty{padding:28px 16px;text-align:center;color:var(--muted)}
 .more{display:flex;justify-content:center;padding:12px;border-top:1px solid var(--line)}
@@ -460,10 +462,119 @@ const S = {
   noteDraft: new Map(),      // unsaved note text, kept across re-renders
   focusNote: null,
   shown: PAGE,
+  pubGroups: new Map(),      // normalized publisher key -> { key, label, n }, for the whole library
+  devGroups: new Map(),
+  pickQ: { pub: "", dev: "" }, // text typed in the publisher / developer pickers
   f: null,                   // filter state, set below
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+
+// ---------------------------------------------------------------- grouping helpers
+// <stats-core>
+// Pure helpers: no DOM and no page state, so tests/test_stats.py can run this block under node.
+// Publisher and developer names are grouped by a normalized key. Trailing corporate suffixes are removed
+// repeatedly ("Square Enix Co., Ltd." and "Square Enix" are one group). The rules live in these two constants.
+const NAME_SUFFIXES = ["inc", "llc", "ltd", "co", "corp", "corporation", "gmbh", "sa", "ab", "limited"];
+const NAME_MARKS = /[™®©]/g;
+function nameKey(raw) {
+  const strip = (x) => x.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+  const t = strip(String(raw === null || raw === undefined ? "" : raw).replace(NAME_MARKS, "").normalize("NFKC").toLowerCase())
+    .split(/\s+/).filter(Boolean);
+  while (t.length > 1 && NAME_SUFFIXES.includes(t[t.length - 1].replace(/[^\p{L}\p{N}]/gu, ""))) {
+    t.pop();
+    t[t.length - 1] = strip(t[t.length - 1]);
+    while (t.length > 1 && t[t.length - 1] === "") t.pop();
+  }
+  return t.join(" ");
+}
+// Adds pubKeys and devKeys (deduplicated normalized keys, blanks dropped) to a game, and makes sure the raw lists exist.
+function annotateNames(g) {
+  const keys = (list) => [...new Set((list || []).map(nameKey).filter(Boolean))];
+  g.publishers = Array.isArray(g.publishers) ? g.publishers : [];
+  g.developers = Array.isArray(g.developers) ? g.developers : [];
+  g.pubKeys = keys(g.publishers);
+  g.devKeys = keys(g.developers);
+  return g;
+}
+// key -> { key, label, n }: n counts games (once each), label is the most common original spelling (ties: A to Z).
+function nameGroups(games, field) {
+  const keysOf = field === "pub" ? "pubKeys" : "devKeys", listOf = field === "pub" ? "publishers" : "developers";
+  const groups = new Map();
+  for (const g of games) {
+    for (const raw of g[listOf] || []) {
+      const key = nameKey(raw);
+      if (!key) continue;
+      let e = groups.get(key);
+      if (!e) groups.set(key, (e = { key, label: "", n: 0, spell: new Map() }));
+      e.spell.set(raw, (e.spell.get(raw) || 0) + 1);
+    }
+    for (const key of g[keysOf] || []) { const e = groups.get(key); if (e) e.n++; }
+  }
+  for (const e of groups.values()) {
+    e.label = [...e.spell.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))[0][0];
+    delete e.spell;
+  }
+  return groups;
+}
+
+// The newer export fields. Kept apart from normalize() on purpose: normalize() is part of the score parity check
+// (SCORING.md), so changing it means regenerating the vectors in two repositories. Unknown or malformed values
+// become "no data", never a failure.
+function normalizeExtras(g) {
+  const n = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+  const names = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim()).slice(0, 10) : []);
+  const r = g.reviews;
+  return {
+    publishers: names(g.publishers),
+    developers: names(g.developers),
+    reviews: r && typeof r === "object"
+      ? { total: Math.max(0, n(r.total) || 0), pct: n(r.pct), desc: typeof r.desc === "string" ? r.desc : null }
+      : null,
+  };
+}
+const normalizeGame = (g) => Object.assign(normalize(g), normalizeExtras(g));
+
+// Steam's review labels, best to worst, then the games with too few reviews to get one.
+const REVIEW_LEVELS = [
+  ["overwhelmingly-positive", "Overwhelmingly Positive"], ["very-positive", "Very Positive"], ["positive", "Positive"],
+  ["mostly-positive", "Mostly Positive"], ["mixed", "Mixed"], ["mostly-negative", "Mostly Negative"],
+  ["negative", "Negative"], ["very-negative", "Very Negative"], ["overwhelmingly-negative", "Overwhelmingly Negative"],
+  ["few", "Too few reviews"],
+];
+const REVIEW_KEYS = REVIEW_LEVELS.map((l) => l[0]);
+// null when the export has no review data for the game; "few" when Steam gave no label ("12 user reviews").
+function reviewBucket(g) {
+  if (!g.reviews) return null;
+  const hit = REVIEW_LEVELS.find((l) => l[0] !== "few" && l[1] === g.reviews.desc);
+  return hit ? hit[0] : "few";
+}
+
+// Metacritic buckets: [key, label, min, max]. A bucket is exactly the filter mc = min, mcmax = max.
+const MC_BUCKETS = [["lt60", "Under 60", null, 59], ["60s", "60s", 60, 69], ["70s", "70s", 70, 79], ["80s", "80s", 80, 89], ["90p", "90+", 90, null]];
+const MC_MAX_OPTS = [59, 69, 79, 89];
+function mcBucket(g) {
+  if (!g.metacritic) return null;
+  const hit = MC_BUCKETS.find((b) => (b[2] === null || g.metacritic >= b[2]) && (b[3] === null || g.metacritic <= b[3]));
+  return hit ? hit[0] : null;
+}
+
+// Dimensions that can be filtered down to "only games with no data" (the f.unk list).
+const UNK_KEYS = ["gen", "pub", "dev", "pt", "mc", "yr", "ctrl", "rv"];
+function isUnknown(g, k) {
+  switch (k) {
+    case "gen": return !(g.genres && g.genres.length);
+    case "pub": return !(g.pubKeys && g.pubKeys.length);
+    case "dev": return !(g.devKeys && g.devKeys.length);
+    case "pt": return !(g.proton && g.proton.tier);
+    case "mc": return !g.metacritic;
+    case "yr": return !g.year;
+    case "ctrl": return !g.controller && !g.hasDetails;
+    case "rv": return reviewBucket(g) === null;
+  }
+  return false;
+}
+// </stats-core>
 
 // ---------------------------------------------------------------- filter state
 // Flat filter state. Arrays are multi-select. "*Unk" flags mean "include games with no data".
@@ -481,9 +592,12 @@ const DEFAULT_F = {
   deck: [], gen: [], genUnk: false, gm: "any",
   dsrc: "main", dmin: null, dmax: null, dnone: false, durUnk: false,
   pt: [], ptUnk: false,
-  mc: null, mcUnk: false,
+  mc: null, mcmax: null, mcUnk: false,
   ymin: null, ymax: null, yrUnk: false,
   ctrl: [], ctrlUnk: false,
+  pub: [], pubUnk: false, dev: [], devUnk: false,
+  rv: [], rvUnk: false,
+  unk: [],
   play: [], lane: [], notes: "",
 };
 const numIn = (v, lo, hi) => {
@@ -512,10 +626,20 @@ function clean(raw) {
   r.ptUnk = o.ptUnk === true;
   const mc = Number(o.mc);
   r.mc = MC_OPTS.includes(mc) ? mc : null;
+  const mcmax = Number(o.mcmax);
+  r.mcmax = o.mcmax !== null && o.mcmax !== undefined && MC_MAX_OPTS.includes(mcmax) ? mcmax : null;
   r.mcUnk = o.mcUnk === true;
   r.ymin = numIn(o.ymin, 1950, 2100);
   r.ymax = numIn(o.ymax, 1950, 2100);
   r.yrUnk = o.yrUnk === true;
+  const names = (v) => (Array.isArray(v) ? [...new Set(v.map(String))].filter((x) => x && x.length <= 80).slice(0, 50) : []);
+  r.pub = names(o.pub);
+  r.pubUnk = o.pubUnk === true;
+  r.dev = names(o.dev);
+  r.devUnk = o.devUnk === true;
+  r.rv = pickIn(o.rv, REVIEW_KEYS);
+  r.rvUnk = o.rvUnk === true;
+  r.unk = pickIn(o.unk, UNK_KEYS);
   r.ctrl = pickIn(o.ctrl, CTRLS);
   r.ctrlUnk = o.ctrlUnk === true;
   r.play = pickIn(o.play, PLAYS);
@@ -578,7 +702,8 @@ function activeCount() {
   return [
     f.q.trim() !== "", f.deck.length > 0, f.gen.length > 0,
     f.dnone || f.dmin !== null || f.dmax !== null, f.pt.length > 0,
-    f.mc !== null, f.ymin !== null || f.ymax !== null, f.ctrl.length > 0,
+    f.mc !== null || f.mcmax !== null, f.ymin !== null || f.ymax !== null, f.ctrl.length > 0,
+    f.pub.length > 0, f.dev.length > 0, f.rv.length > 0, f.unk.length > 0,
     f.play.length > 0, f.lane.length > 0, f.notes !== "",
   ].filter(Boolean).length;
 }
@@ -591,6 +716,29 @@ const SAMPLE_PROTON = {
   546560: ["gold", 410], 1174180: ["gold", 2400], 1245620: ["gold", 3900], 1086940: ["platinum", 3100],
   219150: ["silver", 210], 1091500: ["borked", 500],
 };
+// Sample publishers, developers and Steam reviews: appid -> [publisher, developer, review count, % positive, label]
+const SAMPLE_META = {
+  620: ["Valve", "Valve", 330000, 98, "Overwhelmingly Positive"], 1145360: ["Supergiant Games", "Supergiant Games", 240000, 98, "Overwhelmingly Positive"],
+  413150: ["ConcernedApe", "ConcernedApe", 700000, 98, "Overwhelmingly Positive"], 504230: ["Maddy Makes Games Inc.", "Maddy Makes Games, Extremely OK Games, Ltd.", 85000, 97, "Overwhelmingly Positive"],
+  1794680: ["Poncle", "Poncle", 340000, 98, "Overwhelmingly Positive"], 1092790: ["Devolver Digital", "Daniel Mullins Games", 34000, 97, "Overwhelmingly Positive"],
+  753640: ["Annapurna Interactive", "Mobius Digital", 60000, 95, "Very Positive"], 632470: ["ZA/UM", "ZA/UM", 150000, 90, "Very Positive"],
+  653530: ["3909 LLC", "3909 LLC", 26000, 97, "Overwhelmingly Positive"], 1205520: ["Xbox Game Studios", "Obsidian Entertainment", 17000, 91, "Very Positive"],
+  553420: ["Finji", "TUNIC Team", 28000, 95, "Very Positive"], 367520: ["Team Cherry", "Team Cherry", 330000, 97, "Overwhelmingly Positive"],
+  646570: ["Mega Crit", "Mega Crit", 150000, 97, "Overwhelmingly Positive"], 1091500: ["CD PROJEKT RED", "CD PROJEKT RED", 640000, 80, "Very Positive"],
+  870780: ["505 Games", "Remedy Entertainment", 70000, 91, "Very Positive"], 1190460: ["505 Games", "Kojima Productions", 70000, 88, "Very Positive"],
+  546560: ["Valve", "Valve", 100000, 96, "Overwhelmingly Positive"], 1085660: ["Bungie", "Bungie", 570000, 78, "Mostly Positive"],
+  1055540: ["Adam Robinson-Yu", "Adam Robinson-Yu", 22000, 97, "Overwhelmingly Positive"], 1135690: ["Humble Games", "Witch Beam", 27000, 93, "Very Positive"],
+  683320: ["Devolver Digital Inc.", "Nomada Studio", 20000, 95, "Very Positive"], 501300: ["Annapurna Interactive", "Giant Sparrow", 17000, 95, "Very Positive"],
+  383870: ["Panic Inc.", "Campo Santo", 70000, 89, "Very Positive"], 460950: ["Devolver Digital", "Askiisoft", 33000, 97, "Overwhelmingly Positive"],
+  588650: ["Motion Twin", "Motion Twin", 130000, 96, "Overwhelmingly Positive"], 219150: ["DEVOLVER DIGITAL", "Dennaton Games", 80000, 96, "Overwhelmingly Positive"],
+  590380: ["Subset Games", "Subset Games", 25000, 97, "Overwhelmingly Positive"], 972660: ["Thunder Lotus Games", "Thunder Lotus Games", 15000, 91, "Very Positive"],
+  1244090: ["Sabotage Studio", "Sabotage Studio", 14000, 94, "Very Positive"], 1086940: ["Larian Studios", "Larian Studios", 530000, 96, "Overwhelmingly Positive"],
+  292030: ["CD PROJEKT RED", "CD PROJEKT RED", 700000, 96, "Overwhelmingly Positive"], 1174180: ["Rockstar Games", "Rockstar Games", 580000, 81, "Very Positive"],
+  1245620: ["FromSoftware Inc., Bandai Namco Entertainment", "FromSoftware Inc.", 800000, 90, "Very Positive"], 412020: ["Deep Silver", "4A Games", 56000, 86, "Very Positive"],
+  264710: ["Unknown Worlds Entertainment", "Unknown Worlds Entertainment", 250000, 95, "Very Positive"], 782330: ["Bethesda Softworks", "id Software", 140000, 91, "Very Positive"],
+  1237970: ["Electronic Arts", "Respawn Entertainment", 55000, 93, "Very Positive"], 1262350: ["Humble Games", "rose-engine", 26000, 97, "Overwhelmingly Positive"],
+  1868140: ["MINTROCKET", "MINTROCKET", 85000, 97, "Overwhelmingly Positive"],
+};
 function sampleGames() {
   const now = Date.now() / 1000;
   return SAMPLE.map(([appid, name, pt, dpt, days, deck, h, genres, mc, year]) => ({
@@ -600,6 +748,9 @@ function sampleGames() {
     genres, metacritic: mc, year, controller: null,
     proton: SAMPLE_PROTON[appid] ? { tier: SAMPLE_PROTON[appid][0], total: SAMPLE_PROTON[appid][1] } : null,
     hasProton: true, hasDetails: true,
+    publishers: SAMPLE_META[appid] ? SAMPLE_META[appid][0].split(", ") : [],
+    developers: SAMPLE_META[appid] ? SAMPLE_META[appid][1].split(", ") : [],
+    reviews: SAMPLE_META[appid] ? { total: SAMPLE_META[appid][2], pct: SAMPLE_META[appid][3], desc: SAMPLE_META[appid][4] } : null,
   }));
 }
 function normalize(g) {
@@ -722,6 +873,9 @@ function reasons(g) {
 
 // ---------------------------------------------------------------- library
 function setLibrary(games, source, meta) {
+  games.forEach(annotateNames);
+  S.pubGroups = nameGroups(games, "pub");
+  S.devGroups = nameGroups(games, "dev");
   S.games = games;
   S.byId = new Map(games.map((g) => [g.appid, g]));
   S.source = source;
@@ -846,10 +1000,24 @@ function passes(g) {
     if (!tier) { if (!f.ptUnk) return false; }
     else if (!f.pt.includes(tier)) return false;
   }
-  if (f.mc !== null) {
+  if (f.mc !== null || f.mcmax !== null) {
     if (!g.metacritic) { if (!f.mcUnk) return false; }
-    else if (g.metacritic < f.mc) return false;
+    else if ((f.mc !== null && g.metacritic < f.mc) || (f.mcmax !== null && g.metacritic > f.mcmax)) return false;
   }
+  if (f.pub.length) {
+    if (!g.pubKeys.length) { if (!f.pubUnk) return false; }
+    else if (!g.pubKeys.some((k) => f.pub.includes(k))) return false;
+  }
+  if (f.dev.length) {
+    if (!g.devKeys.length) { if (!f.devUnk) return false; }
+    else if (!g.devKeys.some((k) => f.dev.includes(k))) return false;
+  }
+  if (f.rv.length) {
+    const b = reviewBucket(g);
+    if (b === null) { if (!f.rvUnk) return false; }
+    else if (!f.rv.includes(b)) return false;
+  }
+  for (const k of f.unk) if (!isUnknown(g, k)) return false;
   if (f.ymin !== null || f.ymax !== null) {
     if (!g.year) { if (!f.yrUnk) return false; }
     else if ((f.ymin !== null && g.year < f.ymin) || (f.ymax !== null && g.year > f.ymax)) return false;
@@ -910,8 +1078,37 @@ function segHtml(key, opts) {
 function unkHtml(key) {
   return `<label class="unk"><input type="checkbox" data-fb="${key}" ${S.f[key] ? "checked" : ""}> Include unknown</label>`;
 }
-function fgroup(title, body, unk) {
-  return `<div class="fgroup"><div class="fhead"><span>${esc(title)}</span>${unk ? unkHtml(unk) : ""}</div>${body}</div>`;
+// "Only unknown" (the f.unk list): show just the games with no data for a dimension. Turning it on clears that
+// dimension's own values, since a game can't be both known and unknown.
+const UNK_FIELDS = { gen: ["gen", "genUnk"], pub: ["pub", "pubUnk"], dev: ["dev", "devUnk"], pt: ["pt", "ptUnk"],
+                     mc: ["mc", "mcmax", "mcUnk"], yr: ["ymin", "ymax", "yrUnk"], ctrl: ["ctrl", "ctrlUnk"], rv: ["rv", "rvUnk"] };
+function onlyUnkHtml(dim) {
+  return `<label class="unk"><input type="checkbox" data-fu="${dim}" ${S.f.unk.includes(dim) ? "checked" : ""}> Only unknown</label>`;
+}
+function fgroup(title, body, unk, dim) {
+  const tools = [unk ? unkHtml(unk) : "", dim ? onlyUnkHtml(dim) : ""].join("");
+  return `<div class="fgroup"><div class="fhead"><span>${esc(title)}</span>${tools ? `<span class="ftools">${tools}</span>` : ""}</div>${body}</div>`;
+}
+// Publisher / developer picker: a search box, the chosen values, and the best matches. Many hundreds of values, so
+// the list is searched, not shown whole.
+function pickerOptions(field) {
+  const groups = field === "pub" ? S.pubGroups : S.devGroups;
+  const q = S.pickQ[field].trim().toLowerCase();
+  const chosen = new Set(S.f[field]);
+  let list = [...groups.values()].filter((e) => !chosen.has(e.key) && (!q || e.label.toLowerCase().includes(q) || e.key.includes(q)));
+  list.sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  const shown = list.slice(0, 30);
+  if (!shown.length) return `<p class="fhint">${groups.size ? "No match." : "No data yet. Re-export with --details."}</p>`;
+  return `<div class="seg">${shown.map((e) => `<button type="button" data-fa="${field}" data-fv="${esc(e.key)}" aria-pressed="false">${esc(e.label)} <small class="num">${e.n}</small></button>`).join("")}</div>` +
+    (list.length > shown.length ? `<p class="fhint">${(list.length - shown.length).toLocaleString()} more. Type to narrow the list.</p>` : "");
+}
+function pickerHtml(field, noun) {
+  const groups = field === "pub" ? S.pubGroups : S.devGroups;
+  const chosen = S.f[field].map((k) => `<button type="button" data-fa="${field}" data-fv="${esc(k)}" aria-pressed="true" aria-label="Remove ${esc(groups.has(k) ? groups.get(k).label : k)}">${esc(groups.has(k) ? groups.get(k).label : k)} ✕</button>`).join("");
+  return `${chosen ? `<div class="seg">${chosen}</div>` : ""}
+    <input type="search" data-ps="${field}" placeholder="Search ${noun}s" value="${esc(S.pickQ[field])}" autocomplete="off" aria-label="Search ${noun}s">
+    <div id="opts-${field}">${pickerOptions(field)}</div>
+    <p class="fhint">A game with several ${noun}s matches any of them.</p>`;
 }
 function topGenres() {
   const counts = new Map();
@@ -928,20 +1125,25 @@ function renderPanel() {
     (genres.length
       ? segHtml("gen", genres.map((x) => [x, x])) +
         `<div class="radio"><label><input type="radio" name="gm" data-fs="gm" value="any" ${f.gm === "any" ? "checked" : ""}> Any of these</label> <label><input type="radio" name="gm" data-fs="gm" value="all" ${f.gm === "all" ? "checked" : ""}> All of these</label></div>`
-      : `<p class="fhint">No genre data yet. Re-export with --details.</p>`), "genUnk"));
+      : `<p class="fhint">No genre data yet. Re-export with --details.</p>`), "genUnk", "gen"));
   parts.push(fgroup("Duration (HowLongToBeat)",
     `<div class="frow"><label>Length from<select data-fs="dsrc">${[["main", "Main story"], ["extra", "Main + extras"], ["complete", "Completionist"]].map(([v, l]) => `<option value="${v}" ${f.dsrc === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
      <div class="frow"><label>Min hours<input type="number" min="0" step="0.1" data-fs="dmin" value="${f.dmin ?? ""}"></label><label>Max hours<input type="number" min="0" step="0.1" data-fs="dmax" value="${f.dmax ?? ""}"></label></div>
      <label class="unk"><input type="checkbox" data-fb="dnone" ${f.dnone ? "checked" : ""}> Only games with no HLTB data</label>`, "durUnk"));
   parts.push(fgroup("ProtonDB tier",
     segHtml("pt", TIERS.map((t) => [t, TIER_LABELS[t]])) +
-    (hasProton ? "" : `<p class="fhint">ProtonDB needs a newer export. Re-export to enable this filter.</p>`), "ptUnk"));
+    (hasProton ? "" : `<p class="fhint">ProtonDB needs a newer export. Re-export to enable this filter.</p>`), "ptUnk", "pt"));
   parts.push(fgroup("Metacritic",
-    `<select data-fs="mc"><option value="">Any score</option>${MC_OPTS.map((v) => `<option value="${v}" ${f.mc === v ? "selected" : ""}>${v}+</option>`).join("")}</select>`, "mcUnk"));
+    `<div class="frow"><label>At least<select data-fs="mc"><option value="">Any</option>${MC_OPTS.map((v) => `<option value="${v}" ${f.mc === v ? "selected" : ""}>${v}+</option>`).join("")}</select></label>
+     <label>At most<select data-fs="mcmax"><option value="">Any</option>${MC_MAX_OPTS.map((v) => `<option value="${v}" ${f.mcmax === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>`, "mcUnk", "mc"));
+  parts.push(fgroup("Steam user reviews",
+    segHtml("rv", REVIEW_LEVELS) + (S.games.some((g) => g.reviews) ? "" : `<p class="fhint">No review data yet. Re-export with --details.</p>`), "rvUnk", "rv"));
+  parts.push(fgroup("Publisher", pickerHtml("pub", "publisher"), "pubUnk", "pub"));
+  parts.push(fgroup("Developer", pickerHtml("dev", "developer"), "devUnk", "dev"));
   parts.push(fgroup("Release year",
-    `<div class="frow"><label>From<input type="number" min="1950" max="2100" step="1" data-fs="ymin" value="${f.ymin ?? ""}"></label><label>To<input type="number" min="1950" max="2100" step="1" data-fs="ymax" value="${f.ymax ?? ""}"></label></div>`, "yrUnk"));
+    `<div class="frow"><label>From<input type="number" min="1950" max="2100" step="1" data-fs="ymin" value="${f.ymin ?? ""}"></label><label>To<input type="number" min="1950" max="2100" step="1" data-fs="ymax" value="${f.ymax ?? ""}"></label></div>`, "yrUnk", "yr"));
   parts.push(fgroup("Deck status", segHtml("deck", DECK_ORDER.map((d) => [String(d), DECK[d].label]))));
-  parts.push(fgroup("Controller support", segHtml("ctrl", [["full", "Full"], ["partial", "Partial"], ["none", "None listed"]]), "ctrlUnk"));
+  parts.push(fgroup("Controller support", segHtml("ctrl", [["full", "Full"], ["partial", "Partial"], ["none", "None listed"]]), "ctrlUnk", "ctrl"));
   parts.push(fgroup("Play state", segHtml("play", [["never", "Never launched"], ["tried", "Tried (under 2h)"], ["played", "Played 2h+"]])));
   parts.push(fgroup("Triage lane", segHtml("lane", [["none", "No lane"], ["next", "Up next"], ["someday", "Someday"], ["skip", "Skipped"], ["done", "Finished"]])));
   if (canEdit()) {
@@ -999,13 +1201,28 @@ function toggleArr(key, v) {
   const cur = S.f[key];
   const on = cur.map(String).includes(s);
   S.f[key] = on ? cur.filter((x) => String(x) !== s) : [...cur, key === "deck" ? Number(v) : s];
+  if (!on) S.f.unk = S.f.unk.filter((x) => x !== key);  // a value and "only unknown" can't both hold
   S.f = clean(S.f);
   apply();
 }
 document.addEventListener("change", (e) => {
   const t = e.target;
   if (t.dataset && t.dataset.fb !== undefined) { S.f[t.dataset.fb] = t.checked; S.f = clean(S.f); apply(); return; }
-  if (t.dataset && t.dataset.fs !== undefined) { S.f[t.dataset.fs] = t.value; S.f = clean(S.f); apply(); }
+  if (t.dataset && t.dataset.fu !== undefined) {
+    const dim = t.dataset.fu;
+    S.f.unk = S.f.unk.filter((x) => x !== dim);
+    if (t.checked) {
+      S.f.unk.push(dim);
+      for (const k of UNK_FIELDS[dim] || []) S.f[k] = Array.isArray(DEFAULT_F[k]) ? [] : DEFAULT_F[k];
+    }
+    S.f = clean(S.f); apply(); return;
+  }
+  if (t.dataset && t.dataset.fs !== undefined) {
+    S.f[t.dataset.fs] = t.value;
+    const dim = { mc: "mc", mcmax: "mc", ymin: "yr", ymax: "yr" }[t.dataset.fs];
+    if (dim && t.value !== "") S.f.unk = S.f.unk.filter((x) => x !== dim);   // a value and "only unknown" can't both hold
+    S.f = clean(S.f); apply();
+  }
 });
 $("showHowto").addEventListener("click", () => { $("howto").open = true; $("howto").scrollIntoView({ behavior: "smooth", block: "start" }); });
 
@@ -1045,6 +1262,8 @@ function selectCode(btn) {
 
 // Note drafts and drag-to-reorder (self-hosted only)
 document.addEventListener("input", (e) => {
+  const field = e.target.dataset && e.target.dataset.ps;
+  if (field) { S.pickQ[field] = e.target.value.slice(0, 80); $("opts-" + field).innerHTML = pickerOptions(field); return; }
   const id = e.target.dataset && e.target.dataset.noteFor;
   if (id !== undefined) S.noteDraft.set(Number(id), e.target.value);
 });
@@ -1207,7 +1426,7 @@ $("fileInput").addEventListener("change", async (e) => {
   if (!data || !Array.isArray(data.games) || !data.games.every((g) => g && Number.isFinite(Number(g.appid)))) {
     toast("That file doesn't look like an export from steam_backlog_export.py."); return;
   }
-  const games = data.games.map(normalize);
+  const games = data.games.map(normalizeGame);
   const meta = { exportedAt: data.exportedAt || new Date().toISOString(), persona: data.persona || null, steamid: data.steamid || null };
   if (S.server) {
     try {
@@ -1263,7 +1482,7 @@ async function loadFromDb(meta, tries = 0) {
     return;
   }
   S.loadedVersion = meta.version;
-  setLibrary(parts.flatMap((p) => p.games || []).map(normalize), "db", meta);
+  setLibrary(parts.flatMap((p) => p.games || []).map(normalizeGame), "db", meta);
 }
 
 async function bootDb() {
@@ -1363,7 +1582,7 @@ async function bootServer() {
   } catch (e) {}
   if (r.ok) {
     const data = await r.json();
-    setLibrary((data.games || []).map(normalize), "server",
+    setLibrary((data.games || []).map(normalizeGame), "server",
                { exportedAt: data.exportedAt, persona: data.persona, steamid: data.steamid });
   } else {
     renderHeader();
@@ -1400,7 +1619,7 @@ async function reloadLibrary() {
   const r = await fetch("api/library", { cache: "no-store" });
   if (!r.ok) throw new Error("library " + r.status);
   const data = await r.json();
-  setLibrary((data.games || []).map(normalize), "server",
+  setLibrary((data.games || []).map(normalizeGame), "server",
              { exportedAt: data.exportedAt, persona: data.persona, steamid: data.steamid });
 }
 async function pollRefresh() {
