@@ -82,14 +82,14 @@ class StatsPage(unittest.TestCase):
         page.on("requestfailed", lambda r: self.problems.append(f"request failed: {r.url} {r.failure}"))
         page.on("response", lambda r: self.problems.append(f"HTTP {r.status}: {r.url}") if r.status >= 400 else None)
         page.goto(self.base + path + (("#" + hash_) if hash_ else ""))
-        page.wait_for_function("document.getElementById('who').textContent.includes('Fixture Persona')", timeout=15000)
+        page.wait_for_function("((document.getElementById('who') || {textContent: ''}).textContent).includes('Fixture Persona')", timeout=15000)
         return page
 
     @staticmethod
     def list_count(page, want=None) -> int:
         """The number of games the list says it selects (the second number in "Showing x of y"). The page renders
         once with saved filters and again when the hash applies, so wait for the line to settle."""
-        page.wait_for_function("document.getElementById('wrap').dataset.mode === 'list'", timeout=15000)
+        page.wait_for_function("((document.getElementById('wrap') || {dataset: {}}).dataset.mode) === 'list'", timeout=15000)
         last = None
         for _ in range(60):
             text = page.inner_text("#countLine")
@@ -147,8 +147,8 @@ class StatsPage(unittest.TestCase):
         page = self.open("/", "view=all&pub=valve")
         n = self.list_count(page)
         page.click("#pagesNav a:has-text('Stats')")
-        page.wait_for_function("document.getElementById('wrap').dataset.mode === 'stats' && document.querySelector('.tile')", timeout=15000)
-        page.wait_for_function(f"document.getElementById('countLine').textContent.startsWith('{n} games in this view')", timeout=15000)
+        page.wait_for_function("((document.getElementById('wrap') || {dataset: {}}).dataset.mode) === 'stats' && document.querySelector('.tile')", timeout=15000)
+        page.wait_for_function(f"((document.getElementById('countLine') || {{textContent: ''}}).textContent).startsWith('{n} games in this view')", timeout=15000)
         self.assertIn("pub=valve", page.url)
         page.click("#pagesNav a:has-text('Backlog')")
         self.assertEqual(self.list_count(page), n)

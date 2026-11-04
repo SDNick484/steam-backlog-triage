@@ -20,7 +20,7 @@ REAL_ID = "7656119" + "8" * 10
 PUBLIC_IP = ".".join(["8", "8", "4", "4"])
 OWN_IP = ".".join(["73", "12", "200", "9"])
 PERSONAL_MAIL = "someone" + "@" + "gmail" + ".com"
-HOST = "mybox" + "-" + "pve"
+HOST = "".join(["my", "box", "-", "p", "v", "e"])
 
 
 class Repo:
