@@ -7,6 +7,7 @@ What it collects for every game you own:
   * Steam Deck compatibility: Verified / Playable / Unsupported     (Steam store)
   * HowLongToBeat main / main+extra / completionist hours           (optional, howlongtobeatpy)
   * genres, Metacritic score, release year, controller support     (optional, --details)
+  * publishers and developers                                      (optional, --details)
   * ProtonDB tier (native..borked, pending) and report count       (ProtonDB, no key)
 
 Everything it looks up is cached in steam_backlog_cache.json, so the first run is the
@@ -209,6 +210,25 @@ def fetch_proton(appid: int, limiter: RateLimiter) -> dict | None:
     }
 
 
+def clean_names(values) -> list[str]:
+    """A list of names from appdetails (publishers, developers): strings only, trimmed, empties dropped,
+    order kept. Steam sometimes sends [""] for a game with no publisher."""
+    if not isinstance(values, list):
+        return []
+    out = []
+    for v in values:
+        if isinstance(v, str) and v.strip():
+            out.append(v.strip())
+    return out
+
+
+def details_current(entry) -> bool:
+    """Does a cached details entry carry every key this version writes? Entries cached before publishers and
+    developers were collected don't, and are fetched once more (see main)."""
+    v = entry.get("v") if entry else None
+    return isinstance(v, dict) and "publishers" in v and "developers" in v
+
+
 def fetch_details(appid: int, limiter: RateLimiter) -> dict | None:
     q = urllib.parse.urlencode({"appids": appid, "l": "english", "cc": "us"})
     data = http_json(f"{STORE_BASE}/api/appdetails?{q}", limiter)
@@ -216,7 +236,8 @@ def fetch_details(appid: int, limiter: RateLimiter) -> dict | None:
         return None
     entry = data.get(str(appid)) or {}
     if not entry.get("success"):
-        return {"genres": [], "metacritic": None, "year": None, "controller": None}
+        return {"genres": [], "metacritic": None, "year": None, "controller": None,
+                "publishers": [], "developers": []}
     d = entry.get("data") or {}
     cats = {c.get("id") for c in d.get("categories") or []}
     controller = "full" if CAT_FULL_CONTROLLER in cats else "partial" if CAT_PARTIAL_CONTROLLER in cats else None
@@ -229,6 +250,8 @@ def fetch_details(appid: int, limiter: RateLimiter) -> dict | None:
         "metacritic": (d.get("metacritic") or {}).get("score"),
         "year": year,
         "controller": controller,
+        "publishers": clean_names(d.get("publishers")),
+        "developers": clean_names(d.get("developers")),
     }
 
 
@@ -392,7 +415,16 @@ def main() -> None:
                 if d is not None:
                     cache.put("details", appid, d)
 
-            todo = [a for a in appids if cache.get("details", a, TTL_DETAILS) is None]
+            todo, backfill = [], 0
+            for a in appids:
+                e = cache.get("details", a, TTL_DETAILS)
+                if e is None:
+                    todo.append(a)
+                elif not details_current(e):  # cached before publishers/developers existed: fetch once more
+                    todo.append(a)
+                    backfill += 1
+            if backfill:
+                log(f"Store details: {backfill} cached games lack publishers and developers; fetching them again.")
             if todo:
                 log(f"  (about {len(todo) * 1.6 / 60:.0f} minutes for store details)")
             run_parallel("Store details", todo, do_details, workers=2)
@@ -459,6 +491,8 @@ def main() -> None:
             "metacritic": det["v"].get("metacritic") if det else None,
             "year": det["v"].get("year") if det else None,
             "controller": det["v"].get("controller") if det else None,
+            "publishers": (det["v"].get("publishers") if det else None) or [],
+            "developers": (det["v"].get("developers") if det else None) or [],
             "proton": pr["v"] if pr else None,
         })
 

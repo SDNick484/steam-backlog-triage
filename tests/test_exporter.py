@@ -14,15 +14,19 @@ import json
 import re
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from _support import MockSteam, fake_steamid, run_exporter  # noqa: E402
+import steam_backlog_export as exporter  # noqa: E402
 
 GAME_KEYS = {"appid", "name", "playtime", "deckPlaytime", "lastPlayed", "deck", "hltb", "genres", "metacritic",
-             "year", "controller", "proton"}
+             "year", "controller", "publishers", "developers", "proton"}
 FAKE_KEY = "FAKEKEY0123456789"
 
 
@@ -297,6 +301,100 @@ class StoreDetails(ExporterCase):
                          ([], None, None, None))
         self.assertEqual((by[2001]["genres"], by[2001]["year"], by[2001]["controller"]),
                          (["Action", "Indie"], 2020, "full"))
+
+    def test_details_fill_publishers_and_developers(self):
+        """--details: publishers and developers from appdetails; [] for an unsuccessful lookup and without --details."""
+        self.mock.details[2002] = [(200, appdetails(2002, publishers=["Devolver Digital", "Other Pub"],
+                                                    developers=["Some Studio"]), {})]
+        self.mock.details[2003] = [(200, {"2003": {"success": False}}, {})]
+        self.ok("--details")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual((by[2002]["publishers"], by[2002]["developers"]), (["Devolver Digital", "Other Pub"], ["Some Studio"]))
+        self.assertEqual((by[2003]["publishers"], by[2003]["developers"]), ([], []))
+        self.assertEqual((by[2001]["publishers"], by[2001]["developers"]), (["Test Publisher Inc."], ["Test Studio"]))
+
+    def test_without_details_the_name_lists_are_empty(self):
+        self.ok()
+        for g in self.library()["games"]:
+            self.assertEqual((g["publishers"], g["developers"]), ([], []))
+
+    def test_an_old_cache_entry_is_fetched_once_more_to_backfill_names(self):
+        """A details entry cached before publishers/developers existed counts as a miss for this run; entries that
+        already have both keys, and entries that are not cached at all, behave as before."""
+        now = int(time.time())
+        old = {"genres": ["RPG"], "metacritic": 80, "year": 2019, "controller": None}
+        new = {"genres": ["Action"], "metacritic": None, "year": 2020, "controller": "full",
+               "publishers": ["Kept Pub"], "developers": ["Kept Dev"]}
+        (self.dir / "steam_backlog_cache.json").write_text(json.dumps({
+            "details": {"2001": {"t": now, "v": new}, "2002": {"t": now, "v": old}}}))
+        p, _ = self.ok("--details")
+        self.assertIn("Store details: 1 cached games lack publishers and developers; fetching them again.", p.stderr)
+        self.assertRegex(p.stderr, r"Store details: fetching 3 games")
+        self.assertEqual(self.mock.hits.get("details:2001", 0), 0, "a current entry is not fetched")
+        self.assertEqual(self.mock.hits["details:2002"], 1)
+        self.assertEqual(self.mock.hits["details:2003"], 1)
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual((by[2001]["publishers"], by[2001]["developers"]), (["Kept Pub"], ["Kept Dev"]))
+        self.assertEqual(by[2002]["publishers"], ["Test Publisher Inc."])
+        # The backfill is a one-off: the next run finds everything current.
+        p, _ = self.ok("--details")
+        self.assertNotIn("lack publishers", p.stderr)
+        self.assertIn("Store details: everything cached.", p.stderr)
+        self.assertEqual(self.mock.hits["details:2002"], 1)
+
+    def test_an_old_cache_entry_is_left_alone_without_details(self):
+        """No --details: no store requests at all, and the old entry still supplies its genres (names are [])."""
+        now = int(time.time())
+        (self.dir / "steam_backlog_cache.json").write_text(json.dumps({
+            "details": {"2002": {"t": now, "v": {"genres": ["RPG"], "metacritic": 80, "year": 2019, "controller": None}}}}))
+        self.ok()
+        self.assertEqual(self.mock.count("details:"), 0)
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual((by[2002]["genres"], by[2002]["publishers"], by[2002]["developers"]), (["RPG"], [], []))
+
+
+def appdetails(appid, **data):
+    return {str(appid): {"success": True, "data": data}}
+
+
+class FetchDetailsNames(unittest.TestCase):
+    """fetch_details against canned appdetails JSON (no network): publishers and developers."""
+
+    def fetch(self, payload, appid=7):
+        with mock.patch.object(exporter, "http_json", return_value=payload):
+            return exporter.fetch_details(appid, exporter.RateLimiter(0))
+
+    def test_names_are_kept_in_order(self):
+        d = self.fetch(appdetails(7, publishers=["Devolver Digital", "Second Pub"], developers=["Studio A", "Studio B"]))
+        self.assertEqual(d["publishers"], ["Devolver Digital", "Second Pub"])
+        self.assertEqual(d["developers"], ["Studio A", "Studio B"])
+
+    def test_names_are_trimmed_and_empty_strings_dropped(self):
+        d = self.fetch(appdetails(7, publishers=[""], developers=["  Studio A  ", "", "   ", "Studio B"]))
+        self.assertEqual(d["publishers"], [])
+        self.assertEqual(d["developers"], ["Studio A", "Studio B"])
+
+    def test_missing_or_malformed_keys_give_empty_lists(self):
+        for extra in ({}, {"publishers": None, "developers": "Studio"}, {"publishers": [1, None, {"x": 1}], "developers": {}}):
+            with self.subTest(extra):
+                d = self.fetch(appdetails(7, genres=[{"description": "Action"}], **extra))
+                self.assertEqual((d["publishers"], d["developers"]), ([], []))
+                self.assertEqual(d["genres"], ["Action"])
+
+    def test_an_unsuccessful_lookup_returns_empty_lists_not_none(self):
+        d = self.fetch({"7": {"success": False}})
+        self.assertEqual(d, {"genres": [], "metacritic": None, "year": None, "controller": None,
+                             "publishers": [], "developers": []})
+
+    def test_network_trouble_is_still_none(self):
+        self.assertIsNone(self.fetch(None))
+
+    def test_details_current(self):
+        self.assertTrue(exporter.details_current({"t": 1, "v": {"genres": [], "publishers": [], "developers": []}}))
+        self.assertFalse(exporter.details_current({"t": 1, "v": {"genres": [], "publishers": []}}))
+        self.assertFalse(exporter.details_current({"t": 1, "v": {"genres": [], "developers": []}}))
+        self.assertFalse(exporter.details_current({"t": 1, "v": {"genres": []}}))
+        self.assertFalse(exporter.details_current(None))
 
 
 class BadInput(ExporterCase):

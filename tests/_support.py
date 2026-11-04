@@ -356,6 +356,8 @@ class MockSteam:
                 "metacritic": {"score": 85},
                 "release_date": {"coming_soon": False, "date": "12 Mar, 2020"},
                 "categories": [{"id": 28, "description": "Full controller support"}],
+                "publishers": ["Test Publisher Inc."],
+                "developers": ["Test Studio"],
             }}})
         if route == "proton":
             canned = self._canned(self.proton, appid, key)
