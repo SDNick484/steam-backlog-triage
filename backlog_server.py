@@ -4,6 +4,7 @@ backlog_server.py - serve the Backlog Triage dashboard.
 
 Standard library only. Serves:
   GET  /                the dashboard page
+  GET  /stats           the same page, showing its Statistics view (also /stats/)
   GET  /api/library     the latest steam_backlog.json (404 until the first export)
   PUT  /api/library     replace it (the page's "Load export" button)
   GET  /api/triage      {appid: lane} for Next / Someday / Skip / Done marks
@@ -575,7 +576,7 @@ def make_handler(app: App):
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
-            if path in ("/", "/index.html"):
+            if path in ("/", "/index.html", "/stats", "/stats/"):
                 try:
                     return self.send(200, app.page_bytes(), "text/html; charset=utf-8")
                 except OSError:

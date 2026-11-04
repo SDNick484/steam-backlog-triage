@@ -92,7 +92,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python -m unittest -v tests.browser.test_page tests.browser.test_filters 2>&1 | tee page.log
+          python -m unittest -v tests.browser.test_page tests.browser.test_filters tests.browser.test_stats_page 2>&1 | tee page.log
           if grep -Ei '\.\.\. skipped|skipped=' page.log; then echo "::error::a test was skipped"; exit 1; fi
 
   # install/alpine.sh twice (and a third time with one option changed) inside python:3.12-alpine, with apk, rc-*,

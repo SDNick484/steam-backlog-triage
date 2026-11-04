@@ -106,6 +106,19 @@ class PageAndHealth(Base):
             self.assertIn("window.APP_CONFIG=", r.text())
             self.assertIn("Refresh library", r.text())
 
+    def test_stats_page_is_the_same_page_at_stats(self):
+        """README, API table: GET /stats and /stats/ -> the dashboard, which shows its Statistics view from the path."""
+        home = self.srv.get("/").text()
+        for path in ("/stats", "/stats/", "/stats?x=1"):
+            r = self.srv.get(path)
+            self.assertEqual(r.status, 200, path)
+            self.assertTrue(r.headers["content-type"].startswith("text/html"), path)
+            self.assertEqual(r.text(), home, path)
+        h = self.srv.req("HEAD", "/stats")
+        self.assertEqual(h.status, 200)
+        self.assertEqual(self.srv.get("/stats/x").status, 404)
+        self.assertEqual(self.srv.get("/statsx").status, 404)
+
     def test_nav_links_reach_the_page_config(self):
         """backlog_server.py docstring: --nav "Deals=https://deals.example.com/" adds a header link."""
         with Server(nav=["Deals=https://deals.example.com/"]) as s:
@@ -727,7 +740,7 @@ class ReadmeRouteTable(unittest.TestCase):
 
     def test_the_readme_table_has_no_route_this_suite_forgot(self):
         """Keeps this file honest: the routes it has dedicated tests for match the README table."""
-        covered = {("GET", "/"), ("GET", "/api/library"), ("PUT", "/api/library"), ("GET", "/api/triage"),
+        covered = {("GET", "/"), ("GET", "/stats"), ("GET", "/api/library"), ("PUT", "/api/library"), ("GET", "/api/triage"),
                    ("PUT", "/api/triage"), ("GET", "/api/notes"), ("PUT", "/api/notes"), ("GET", "/api/order"),
                    ("PUT", "/api/order"), ("GET", "/healthz"),
                    ("POST", "/api/export"), ("GET", "/api/export/status")}  # the last two: test_export_endpoints.py
