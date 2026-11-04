@@ -26,7 +26,7 @@ from _support import MockSteam, fake_steamid, run_exporter  # noqa: E402
 import steam_backlog_export as exporter  # noqa: E402
 
 GAME_KEYS = {"appid", "name", "playtime", "deckPlaytime", "lastPlayed", "deck", "hltb", "genres", "metacritic",
-             "year", "controller", "publishers", "developers", "proton"}
+             "year", "controller", "publishers", "developers", "reviews", "proton"}
 FAKE_KEY = "FAKEKEY0123456789"
 
 
@@ -182,11 +182,11 @@ class Cache(ExporterCase):
         self.assertEqual(self.mock.hits["deck:2001"], 1)
         self.assertEqual(len(self.library()["games"]), 5)
 
-    def test_cache_file_has_all_four_kinds(self):
-        """The cache holds deck, hltb, details and proton sections (CACHE_KINDS)."""
+    def test_cache_file_has_all_kinds(self):
+        """The cache holds deck, hltb, details, proton and reviews sections (CACHE_KINDS)."""
         self.ok()
         cache = json.loads((self.dir / "steam_backlog_cache.json").read_text())
-        self.assertEqual(set(cache), {"deck", "hltb", "details", "proton"})
+        self.assertEqual(set(cache), {"deck", "hltb", "details", "proton", "reviews"})
         self.assertEqual(set(cache["deck"]), {"2001", "2002", "2003", "2004"})
         self.assertEqual(set(cache["deck"]["2001"]), {"t", "v"})
 
@@ -342,6 +342,47 @@ class StoreDetails(ExporterCase):
         self.assertIn("Store details: everything cached.", p.stderr)
         self.assertEqual(self.mock.hits["details:2002"], 1)
 
+    def test_reviews_are_fetched_with_details_and_land_in_the_record(self):
+        self.mock.reviews[2002] = [(200, review_payload(2000, 1500, "Very Positive"), {})]
+        self.mock.reviews[2003] = [(200, review_payload(0, 0, "No user reviews"), {})]
+        p, _ = self.ok("--details")
+        self.assertRegex(p.stderr, r"Store reviews: fetching 4 games")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["reviews"], {"total": 2000, "pct": 75, "desc": "Very Positive"})
+        self.assertEqual(by[2003]["reviews"], {"total": 0, "pct": None, "desc": "No user reviews"})
+        self.assertEqual(by[2001]["reviews"], {"total": 100, "pct": 90, "desc": "Very Positive"})
+
+    def test_reviews_are_off_without_details(self):
+        self.ok()
+        self.assertEqual(self.mock.count("reviews:"), 0)
+        self.assertTrue(all(g["reviews"] is None for g in self.library()["games"]))
+
+    def test_a_reviews_network_failure_is_not_cached_and_the_record_is_null(self):
+        """Like ProtonDB: trouble gives None, nothing is cached, the next run asks again."""
+        self.mock.reviews[2002] = [(404, b"", {})]
+        self.ok("--details")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertIsNone(by[2002]["reviews"])
+        self.assertNotIn("2002", json.loads((self.dir / "steam_backlog_cache.json").read_text())["reviews"])
+        self.mock.reviews[2002] = [(200, review_payload(40, 30, "Mostly Positive"), {})]
+        self.mock.hits.pop("reviews:2002")
+        self.ok("--details")
+        self.assertEqual(self.mock.hits["reviews:2002"], 1)
+        self.assertEqual(self.mock.count("reviews:"), 4, "three from the first run, then only the failed game")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["reviews"], {"total": 40, "pct": 75, "desc": "Mostly Positive"})
+
+    def test_reviews_are_cached_for_thirty_days(self):
+        self.assertEqual(exporter.TTL_REVIEWS, 30)
+        self.ok("--details")
+        old = json.loads((self.dir / "steam_backlog_cache.json").read_text())
+        old["reviews"]["2001"]["t"] -= 31 * 86400
+        old["reviews"]["2002"]["t"] -= 29 * 86400
+        (self.dir / "steam_backlog_cache.json").write_text(json.dumps(old))
+        self.ok("--details")
+        self.assertEqual(self.mock.hits["reviews:2001"], 2)
+        self.assertEqual(self.mock.hits["reviews:2002"], 1)
+
     def test_an_old_cache_entry_is_left_alone_without_details(self):
         """No --details: no store requests at all, and the old entry still supplies its genres (names are [])."""
         now = int(time.time())
@@ -395,6 +436,57 @@ class FetchDetailsNames(unittest.TestCase):
         self.assertFalse(exporter.details_current({"t": 1, "v": {"genres": [], "developers": []}}))
         self.assertFalse(exporter.details_current({"t": 1, "v": {"genres": []}}))
         self.assertFalse(exporter.details_current(None))
+
+
+def review_payload(total, positive, desc="Very Positive"):
+    return {"success": 1, "query_summary": {"num_reviews": 0, "review_score": 8, "review_score_desc": desc,
+                                            "total_positive": positive, "total_negative": total - positive,
+                                            "total_reviews": total}, "reviews": []}
+
+
+class FetchReviews(unittest.TestCase):
+    """fetch_reviews and review_record against canned appreviews JSON (no network)."""
+
+    def fetch(self, payload):
+        with mock.patch.object(exporter, "http_json", return_value=payload) as m:
+            r = exporter.fetch_reviews(7, exporter.RateLimiter(0))
+        return r, m
+
+    def test_the_summary_is_reduced_to_total_positive_desc(self):
+        r, m = self.fetch(review_payload(1234, 1100, "Very Positive"))
+        self.assertEqual(r, {"total": 1234, "positive": 1100, "desc": "Very Positive"})
+        url = m.call_args.args[0]
+        self.assertRegex(url, r"/appreviews/7\?")
+        for part in ("json=1", "num_per_page=0", "language=all", "purchase_type=all"):
+            self.assertIn(part, url)
+
+    def test_no_reviews(self):
+        r, _ = self.fetch(review_payload(0, 0, "No user reviews"))
+        self.assertEqual(r, {"total": 0, "positive": 0, "desc": "No user reviews"})
+
+    def test_missing_or_malformed_summary_is_zero_not_an_error(self):
+        for payload in ({}, {"success": 0}, {"query_summary": []}, [1, 2],
+                        {"query_summary": {"total_reviews": "many", "total_positive": -4, "review_score_desc": 5}}):
+            with self.subTest(payload):
+                r, _ = self.fetch(payload)
+                self.assertEqual(r, {"total": 0, "positive": 0, "desc": None})
+
+    def test_positive_never_exceeds_total(self):
+        r, _ = self.fetch(review_payload(10, 50))
+        self.assertEqual((r["total"], r["positive"]), (10, 10))
+
+    def test_network_trouble_is_none_so_it_is_not_cached(self):
+        r, _ = self.fetch(None)
+        self.assertIsNone(r)
+
+    def test_review_record(self):
+        rec = exporter.review_record
+        self.assertEqual(rec({"t": 1, "v": {"total": 3, "positive": 2, "desc": "3 user reviews"}}),
+                         {"total": 3, "pct": 67, "desc": "3 user reviews"})
+        self.assertEqual(rec({"t": 1, "v": {"total": 200, "positive": 199, "desc": "x"}})["pct"], 100)
+        self.assertEqual(rec({"t": 1, "v": {"total": 0, "positive": 0, "desc": None}}),
+                         {"total": 0, "pct": None, "desc": None})
+        self.assertIsNone(rec(None))
 
 
 class BadInput(ExporterCase):

@@ -8,6 +8,7 @@ What it collects for every game you own:
   * HowLongToBeat main / main+extra / completionist hours           (optional, howlongtobeatpy)
   * genres, Metacritic score, release year, controller support     (optional, --details)
   * publishers and developers                                      (optional, --details)
+  * Steam user-review summary (count, % positive, label)           (optional, --details)
   * ProtonDB tier (native..borked, pending) and report count       (ProtonDB, no key)
 
 Everything it looks up is cached in steam_backlog_cache.json, so the first run is the
@@ -58,9 +59,10 @@ TTL_DECK = 21
 TTL_HLTB = 90
 TTL_DETAILS = 90
 TTL_PROTON = 7
+TTL_REVIEWS = 30
 
 # Every cache kind the exporter keeps. Loading ignores kinds not listed here.
-CACHE_KINDS = ("deck", "hltb", "details", "proton")
+CACHE_KINDS = ("deck", "hltb", "details", "proton", "reviews")
 
 PROTON_TIERS = {"native", "platinum", "gold", "silver", "bronze", "borked", "pending"}
 
@@ -255,6 +257,38 @@ def fetch_details(appid: int, limiter: RateLimiter) -> dict | None:
     }
 
 
+def fetch_reviews(appid: int, limiter: RateLimiter) -> dict | None:
+    """Steam user-review summary. Returns {'total','positive','desc'}; None on network trouble.
+
+    Uses the store's appreviews endpoint with num_per_page=0, so only the summary comes back (no key needed).
+    'desc' is Steam's own label ('Very Positive', ...) or null; a game with no reviews has total 0.
+    """
+    q = urllib.parse.urlencode({"json": 1, "num_per_page": 0, "language": "all", "purchase_type": "all"})
+    data = http_json(f"{STORE_BASE}/appreviews/{appid}?{q}", limiter)
+    if data is None:
+        return None  # network trouble: don't cache, try again next run
+    summary = data.get("query_summary") if isinstance(data, dict) else None
+    summary = summary if isinstance(summary, dict) else {}
+
+    def count(v):
+        return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+
+    total = count(summary.get("total_reviews"))
+    positive = min(count(summary.get("total_positive")), total)
+    desc = summary.get("review_score_desc")
+    return {"total": total, "positive": positive, "desc": desc.strip() if isinstance(desc, str) and desc.strip() else None}
+
+
+def review_record(entry) -> dict | None:
+    """The game record's 'reviews' value from a cache entry: {'total','pct','desc'}, or None when not fetched."""
+    v = entry.get("v") if entry else None
+    if not isinstance(v, dict):
+        return None
+    total = v.get("total") or 0
+    pct = round(100 * (v.get("positive") or 0) / total) if total else None
+    return {"total": total, "pct": pct, "desc": v.get("desc")}
+
+
 # --------------------------------------------------------------------------- HowLongToBeat
 
 _TRADEMARKS = re.compile(r"[™®©]")
@@ -429,6 +463,19 @@ def main() -> None:
                 log(f"  (about {len(todo) * 1.6 / 60:.0f} minutes for store details)")
             run_parallel("Store details", todo, do_details, workers=2)
 
+            # Steam user reviews: a separate, lighter endpoint, but still be polite. Cached for TTL_REVIEWS days.
+            reviews_limiter = RateLimiter(1.0)
+
+            def do_reviews(appid: int) -> None:
+                r = fetch_reviews(appid, reviews_limiter)
+                if r is not None:
+                    cache.put("reviews", appid, r)
+
+            todo = [a for a in appids if cache.get("reviews", a, TTL_REVIEWS) is None]
+            if todo:
+                log(f"  (about {len(todo) / 60:.0f} minutes for store reviews)")
+            run_parallel("Store reviews", todo, do_reviews, workers=2)
+
         # ProtonDB: roughly one request every 0.3 s, cached for TTL_PROTON days.
         proton_limiter = RateLimiter(0.3)
 
@@ -478,6 +525,7 @@ def main() -> None:
         hl = cache.get("hltb", a, 10**6)
         det = cache.get("details", a, 10**6)
         pr = cache.get("proton", a, 10**6)
+        rv = cache.get("reviews", a, 10**6)
         hv = hl["v"] if hl else None
         games.append({
             "appid": a,
@@ -493,6 +541,7 @@ def main() -> None:
             "controller": det["v"].get("controller") if det else None,
             "publishers": (det["v"].get("publishers") if det else None) or [],
             "developers": (det["v"].get("developers") if det else None) or [],
+            "reviews": review_record(rv),
             "proton": pr["v"] if pr else None,
         })
 

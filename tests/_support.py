@@ -257,7 +257,7 @@ class MockSteam:
     """One local HTTP server standing in for api.steampowered.com, store.steampowered.com and
     protondb.com. Point STEAM_API_BASE, STEAM_STORE_BASE and PROTONDB_BASE at `base`.
 
-    Behavior per app id is set with `deck`, `details` and `proton`: appid -> a list of canned
+    Behavior per app id is set with `deck`, `details`, `reviews` and `proton`: appid -> a list of canned
     responses used in order (the last one repeats). A canned response is a (status, body, headers)
     tuple, where body is bytes or JSON-serializable. Anything not listed gets a normal 200 answer.
     `hits` counts requests per route key ("owned", "persona", "deck:<appid>", ...).
@@ -269,6 +269,7 @@ class MockSteam:
         self.deck: dict[int, list] = {}
         self.details: dict[int, list] = {}
         self.proton: dict[int, list] = {}
+        self.reviews: dict[int, list] = {}
         self.hits: dict[str, int] = {}
         self.paths: list[str] = []
         self._mu = threading.Lock()
@@ -327,6 +328,8 @@ class MockSteam:
             route, appid = "deck", int(q["nAppID"][0])
         elif u.path.endswith("/api/appdetails"):
             route, appid = "details", int(q["appids"][0])
+        elif u.path.startswith("/appreviews/"):
+            route, appid = "reviews", int(u.path.rsplit("/", 1)[1])
         elif u.path.startswith("/api/v1/reports/summaries/"):
             route, appid = "proton", int(u.path.rsplit("/", 1)[1].split(".")[0])
         key = route if appid is None else f"{route}:{appid}"
@@ -359,6 +362,13 @@ class MockSteam:
                 "publishers": ["Test Publisher Inc."],
                 "developers": ["Test Studio"],
             }}})
+        if route == "reviews":
+            canned = self._canned(self.reviews, appid, key)
+            if canned:
+                return self._send(h, *canned)
+            return self._send(h, 200, {"success": 1, "query_summary": {
+                "num_reviews": 0, "review_score": 8, "review_score_desc": "Very Positive",
+                "total_positive": 90, "total_negative": 10, "total_reviews": 100}, "reviews": []})
         if route == "proton":
             canned = self._canned(self.proton, appid, key)
             if canned:
