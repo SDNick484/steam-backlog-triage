@@ -1,0 +1,218 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly: the same checks, plus the contract tests against the MCP server's main branch, and fresh
+    # dependency / base-image releases (python:3.12-alpine, Playwright, the Actions runner image).
+    - cron: "23 14 * * 1"  # Mondays 14:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The MCP server repo (SDNick484/mcp-server-steam-backlog) holds the contract tests that run against this
+  # repo's backlog_server.py. Pinned to a commit so a change over there can't turn this repo's CI red on its own;
+  # the weekly run (contract-against-mcp-main) checks the moving target. Bump it when the contract changes.
+  MCP_REPO: SDNick484/mcp-server-steam-backlog
+  MCP_PINNED_REF: 3aff996ac6c0f61a6c4dad5535d7f989ebdbd347
+
+jobs:
+  # Server routes, export endpoints, the exporter against a mock Steam, run-export.sh, the privacy scanner's own
+  # tests and the score parity with the page, on every supported Python. Nothing here may be skipped: the
+  # tests that need node fail without it, and any "skipped" in the output fails the job.
+  tests:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    env:
+      REQUIRE_NODE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Run the tests
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest -v \
+            tests.test_server \
+            tests.test_export_endpoints \
+            tests.test_exporter \
+            tests.test_run_export \
+            tests.test_privacy_scan \
+            tests.test_score_vectors 2>&1 | tee unittest.log
+      - name: Fail if any test was skipped
+        shell: bash
+        run: |
+          if grep -Ei '\.\.\. skipped|skipped=' unittest.log; then
+            echo "::error::a test was skipped; CI must run every test"
+            exit 1
+          fi
+
+  # backlog.html in a real browser, against backlog_server.py with a stub export.
+  page-smoke:
+    name: Page smoke test (Chromium via Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      REQUIRE_BROWSER: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/browser/requirements.txt
+      - run: pip install -r tests/browser/requirements.txt
+      - name: Cache the Playwright browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/browser/requirements.txt') }}
+      # On a cache hit the download is skipped; --with-deps still installs the system libraries.
+      - run: playwright install --with-deps chromium
+      - name: Run the page test
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest -v tests.browser.test_page 2>&1 | tee page.log
+          if grep -Ei '\.\.\. skipped|skipped=' page.log; then echo "::error::a test was skipped"; exit 1; fi
+
+  # install/alpine.sh twice (and a third time with one option changed) inside python:3.12-alpine, with apk, rc-*,
+  # wget and ip stubbed. Alpine is the primary target, so this runs on the real musl / BusyBox userland.
+  installer:
+    name: Alpine installer, run twice (python:3.12-alpine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker run --rm -v "$PWD:/src:ro" python:3.12-alpine sh /src/tests/installer/check.sh
+
+  lint:
+    name: Lint (shellcheck, py_compile, systemd-analyze)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: shellcheck --version
+      - run: sh .github/scripts/lint.sh
+
+  # No personal details in a public repo. Prints where and which rule, never the matched value.
+  privacy-scan:
+    name: Privacy scan (SteamIDs, IPs, emails, denylist)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Scan files and commits
+        env:
+          # Newline-separated terms (hostnames, domain, names, device names). Not available to pull requests from
+          # forks or to Dependabot; the scan then runs its pattern checks only and says so.
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+          HAVE_DENYLIST: ${{ secrets.PRIVACY_DENYLIST != '' }}
+        run: |
+          flag=""
+          if [ "$HAVE_DENYLIST" = true ]; then
+            flag="--require-denylist"
+          else
+            echo "::warning::PRIVACY_DENYLIST is not available to this run; only the pattern checks ran"
+          fi
+          python .github/scripts/privacy_scan.py $flag
+
+  # The MCP server's contract tests against THIS checkout's backlog_server.py: the page's server must keep
+  # honoring what the MCP server relies on (ETags, previous values, the export status object).
+  contract-against-mcp-pinned:
+    name: MCP contract tests (pinned MCP commit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: triage
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.MCP_REPO }}
+          ref: ${{ env.MCP_PINNED_REF }}
+          path: mcp
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: mcp/pyproject.toml
+      - run: pip install -e "mcp[dev]"
+      - name: Run tests/test_contract.py against this checkout
+        working-directory: mcp
+        env:
+          BACKLOG_CHECKOUT: ${{ github.workspace }}/triage
+          BACKLOG_REQUIRE_REAL: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          # Only the tests against the real server (-k real). The API-1 variants and the ones that drive the
+          # MCP repo's fake legitimately skip against an API 2 server, so skips are fine; what must hold is that
+          # the real server was exercised: BACKLOG_REQUIRE_REAL=1 makes "no checkout" a failure, and this checks
+          # that a healthy number of tests actually passed against it.
+          pytest tests/test_contract.py -k real -v -rs 2>&1 | tee contract.log
+          passed=$(grep -c 'PASSED' contract.log || true)
+          if [ "$passed" -lt 20 ]; then echo "::error::only $passed contract tests passed against the real server (expected 20 or more)"; exit 1; fi
+
+  # Weekly (and on demand): the same, against the MCP server's main branch, to catch drift from that side.
+  contract-against-mcp-main:
+    name: MCP contract tests (MCP main, weekly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: triage
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.MCP_REPO }}
+          ref: main
+          path: mcp
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: mcp/pyproject.toml
+      - run: pip install -e "mcp[dev]"
+      - name: Run tests/test_contract.py against this checkout
+        working-directory: mcp
+        env:
+          BACKLOG_CHECKOUT: ${{ github.workspace }}/triage
+          BACKLOG_REQUIRE_REAL: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          # Only the tests against the real server (-k real). The API-1 variants and the ones that drive the
+          # MCP repo's fake legitimately skip against an API 2 server, so skips are fine; what must hold is that
+          # the real server was exercised: BACKLOG_REQUIRE_REAL=1 makes "no checkout" a failure, and this checks
+          # that a healthy number of tests actually passed against it.
+          pytest tests/test_contract.py -k real -v -rs 2>&1 | tee contract.log
+          passed=$(grep -c 'PASSED' contract.log || true)
+          if [ "$passed" -lt 20 ]; then echo "::error::only $passed contract tests passed against the real server (expected 20 or more)"; exit 1; fi
