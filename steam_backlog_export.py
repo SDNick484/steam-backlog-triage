@@ -60,6 +60,7 @@ TTL_HLTB = 90
 TTL_DETAILS = 90
 TTL_PROTON = 7
 TTL_REVIEWS = 30
+REVIEWS_MAX_FAILURES = 5  # failures in a row before the reviews step gives up for this run
 
 # Every cache kind the exporter keeps. Loading ignores kinds not listed here.
 CACHE_KINDS = ("deck", "hltb", "details", "proton", "reviews")
@@ -126,6 +127,29 @@ def http_json(url: str, limiter: RateLimiter | None = None, retries: int = 4):
             time.sleep(delay)
             delay = min(delay * 2, 120)
     return None
+
+
+class FailureStreak:
+    """Counts failures in a row across threads. `record(ok)` returns True once, when `limit` failures in a row
+    is reached; after that `stopped` is True. A success resets the count. Used to stop a step when Steam has
+    started refusing it (rate limiting), instead of waiting out the retries for every remaining game."""
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self.count = 0
+        self.stopped = False
+        self._mu = threading.Lock()
+
+    def record(self, ok: bool) -> bool:
+        with self._mu:
+            if ok:
+                self.count = 0
+                return False
+            self.count += 1
+            if self.count >= self.limit and not self.stopped:
+                self.stopped = True
+                return True
+            return False
 
 
 def log(msg: str) -> None:
@@ -257,14 +281,14 @@ def fetch_details(appid: int, limiter: RateLimiter) -> dict | None:
     }
 
 
-def fetch_reviews(appid: int, limiter: RateLimiter) -> dict | None:
+def fetch_reviews(appid: int, limiter: RateLimiter, retries: int = 2) -> dict | None:
     """Steam user-review summary. Returns {'total','positive','desc'}; None on network trouble.
 
     Uses the store's appreviews endpoint with num_per_page=0, so only the summary comes back (no key needed).
     'desc' is Steam's own label ('Very Positive', ...) or null; a game with no reviews has total 0.
     """
     q = urllib.parse.urlencode({"json": 1, "num_per_page": 0, "language": "all", "purchase_type": "all"})
-    data = http_json(f"{STORE_BASE}/appreviews/{appid}?{q}", limiter)
+    data = http_json(f"{STORE_BASE}/appreviews/{appid}?{q}", limiter, retries=retries)
     if data is None:
         return None  # network trouble: don't cache, try again next run
     summary = data.get("query_summary") if isinstance(data, dict) else None
@@ -466,15 +490,29 @@ def main() -> None:
             # Steam user reviews: a separate, lighter endpoint, but still be polite. Cached for TTL_REVIEWS days.
             reviews_limiter = RateLimiter(1.0)
 
+            # If Steam starts answering these requests with errors or pages that aren't JSON (it rate-limits the
+            # store), stop after a few failures in a row. Games already fetched are cached, failed ones are not,
+            # so the next run carries on where this one stopped.
+            streak = FailureStreak(REVIEWS_MAX_FAILURES)
+            fetched = {"n": 0}
+
             def do_reviews(appid: int) -> None:
+                if streak.stopped:
+                    return
                 r = fetch_reviews(appid, reviews_limiter)
                 if r is not None:
                     cache.put("reviews", appid, r)
+                    fetched["n"] += 1
+                if streak.record(r is not None):
+                    log(f"Store reviews: {REVIEWS_MAX_FAILURES} requests in a row failed, which usually means Steam is "
+                        "rate limiting this address. Stopping the reviews step; the rest are fetched on the next run.")
 
             todo = [a for a in appids if cache.get("reviews", a, TTL_REVIEWS) is None]
             if todo:
                 log(f"  (about {len(todo) / 60:.0f} minutes for store reviews)")
             run_parallel("Store reviews", todo, do_reviews, workers=2)
+            if streak.stopped:
+                log(f"Store reviews: {fetched['n']} of {len(todo)} fetched this run.")
 
         # ProtonDB: roughly one request every 0.3 s, cached for TTL_PROTON days.
         proton_limiter = RateLimiter(0.3)

@@ -49,7 +49,7 @@ python3 backlog_server.py --data ~/exports   # then open http://localhost:8484/
 
 The first export takes a while for a big library:
 - **Store details** (`--details`): Steam allows about 200 lookups per 5 minutes, so roughly 50 minutes per 1,800 games.
-- **Steam user reviews** (`--details`): one extra request per game to the store's review summary (about one per second, no key needed), so roughly 30 more minutes per 1,800 games on the first run. Results are cached for 30 days, so later runs only fetch games that are new or whose entry has expired. A failed request is not cached and is retried on the next run.
+- **Steam user reviews** (`--details`): one extra request per game to the store's review summary (about one per second, no key needed), so roughly 30 more minutes per 1,800 games on the first run. Results are cached for 30 days, so later runs only fetch games that are new or whose entry has expired. A failed request is not cached and is retried on the next run. If five requests in a row fail (Steam rate-limits the store, usually after a long run of store-detail requests), the exporter stops the reviews step, says so in its log and carries on; run it again later, and it fetches only the games it is missing.
 - **ProtonDB**: about 0.3 s per game, cached for 7 days, so a first run for 1,800 games takes about 9 minutes.
 - **HowLongToBeat:** about half a second per game.
 

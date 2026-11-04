@@ -372,6 +372,32 @@ class StoreDetails(ExporterCase):
         by = {g["appid"]: g for g in self.library()["games"]}
         self.assertEqual(by[2002]["reviews"], {"total": 40, "pct": 75, "desc": "Mostly Positive"})
 
+    def test_reviews_stop_after_a_run_of_failures_and_the_next_run_finishes(self):
+        """Steam throttles the store with pages that aren't JSON. Don't wait out every game: stop, keep the rest
+        uncached, say why, and still write the library."""
+        games = [{"appid": 3000 + i, "name": f"Throttle Game {i:02d}", "playtime_forever": 0} for i in range(30)]
+        mock = MockSteam(games=games)
+        mock.__enter__()
+        self.addCleanup(mock.__exit__, None, None, None)
+        for g in games:
+            mock.reviews[g["appid"]] = [(200, b"<html>slow down</html>", {})]
+        p, _ = self.run_ex("--details", mock=mock)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Stopping the reviews step", p.stderr)
+        self.assertIn("next run", p.stderr)
+        asked = mock.count("reviews:")
+        limit = exporter.REVIEWS_MAX_FAILURES
+        # Each failing game costs 3 requests (the first try and 2 retries); two workers can overshoot by one game.
+        self.assertLessEqual(asked, 3 * (limit + 1), "it kept asking after the limit")
+        self.assertEqual(len(self.library()["games"]), 30, "the library is still written")
+        self.assertTrue(all(g["reviews"] is None for g in self.library()["games"]))
+        # Steam recovers: the next run fetches every game it has not got.
+        for g in games:
+            mock.reviews.pop(g["appid"])
+        p, _ = self.run_ex("--details", mock=mock)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue(all(g["reviews"] is not None for g in self.library()["games"]))
+
     def test_reviews_are_cached_for_thirty_days(self):
         self.assertEqual(exporter.TTL_REVIEWS, 30)
         self.ok("--details")
@@ -444,6 +470,24 @@ def review_payload(total, positive, desc="Very Positive"):
                                             "total_reviews": total}, "reviews": []}
 
 
+class FailureStreakTests(unittest.TestCase):
+    def test_trips_once_after_the_limit_in_a_row(self):
+        s = exporter.FailureStreak(3)
+        self.assertEqual([s.record(False) for _ in range(5)], [False, False, True, False, False])
+        self.assertTrue(s.stopped)
+
+    def test_a_success_resets_the_count(self):
+        s = exporter.FailureStreak(3)
+        for ok in (False, False, True, False, False):
+            self.assertFalse(s.record(ok))
+        self.assertFalse(s.stopped)
+        self.assertTrue(s.record(False))
+
+    def test_the_reviews_limit_is_small_but_not_one(self):
+        self.assertGreaterEqual(exporter.REVIEWS_MAX_FAILURES, 3)
+        self.assertLessEqual(exporter.REVIEWS_MAX_FAILURES, 10)
+
+
 class FetchReviews(unittest.TestCase):
     """fetch_reviews and review_record against canned appreviews JSON (no network)."""
 
@@ -478,6 +522,10 @@ class FetchReviews(unittest.TestCase):
     def test_network_trouble_is_none_so_it_is_not_cached(self):
         r, _ = self.fetch(None)
         self.assertIsNone(r)
+
+    def test_retries_are_kept_short_so_a_throttled_game_does_not_stall_the_run(self):
+        _, m = self.fetch(review_payload(1, 1, "x"))
+        self.assertEqual(m.call_args.kwargs.get("retries"), 2)
 
     def test_review_record(self):
         rec = exporter.review_record
