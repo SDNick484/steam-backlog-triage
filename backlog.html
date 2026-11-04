@@ -225,6 +225,55 @@ input::placeholder{color:var(--muted)}
   .g-lanes{grid-area:lanes}
 }
 
+/* Statistics view */
+.wrap[data-mode="stats"] .only-list{display:none!important}
+.wrap:not([data-mode="stats"]) .only-stats{display:none!important}
+.only-stats{display:flex;flex-direction:column;gap:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile .tk{font-size:12px;font-weight:600;color:var(--muted)}
+.tile .tv{font-family:var(--display);font-size:26px;font-weight:600;line-height:1.15;font-variant-numeric:tabular-nums}
+.tile small{font-size:12px;color:var(--muted)}
+.statbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.scards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:820px){.scards{grid-template-columns:minmax(0,1fr)}}
+.scard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;box-shadow:var(--shadow)}
+.scard.wide{grid-column:1/-1}
+.scard-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
+.scard h3{font-family:var(--body);font-size:15px;font-weight:700}
+.scard-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.cov{font-size:12px;color:var(--muted)}
+.srows{display:flex;flex-direction:column;gap:1px}
+.srow{display:grid;grid-template-columns:minmax(0,38%) minmax(0,1fr) 3.6em;gap:0 10px;align-items:center;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:4px 6px;cursor:pointer;color:var(--ink)}
+.srow:hover{background:var(--surface-2)}
+.srow .sl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+.srow .smid{display:flex;flex-direction:column;gap:3px;min-width:0}
+.sbar{height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden}
+.sbar i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.ssplit{display:flex;height:4px;border-radius:2px;overflow:hidden;background:var(--surface-2)}
+.ssplit i{display:block;height:100%}
+.ssplit .s-never{background:var(--accent)}
+.ssplit .s-tried{background:color-mix(in oklab,var(--accent) 55%,var(--surface-2))}
+.ssplit .s-played{background:color-mix(in oklab,var(--accent) 22%,var(--surface-2))}
+.srow .sv{font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+.srow.unk{color:var(--muted)}
+.srow.unk .sbar i{background:var(--unk)}
+.srow.other{cursor:default}
+.srow.other:hover{background:none}
+@media (max-width:560px){
+  .srow{grid-template-columns:minmax(0,1fr) 3.6em;grid-template-areas:"l v" "m m";gap:3px 8px;padding:6px}
+  .srow .sl{grid-area:l} .srow .sv{grid-area:v} .srow .smid{grid-area:m}
+}
+.scard input[type=search]{padding:6px 9px;font-size:13px}
+.yhist{width:100%;height:auto;display:block}
+.yhist .ybar{cursor:pointer}
+.yhist .ybar rect.v{fill:var(--accent)}
+.yhist .ybar:hover rect.v,.yhist .ybar:focus rect.v{fill:var(--accent-ink)}
+.yhist .ybar rect.hit{fill:transparent}
+.yhist text{font-size:10px;fill:var(--muted);font-family:var(--body)}
+.yhist .ybar:focus{outline:none}
+.yhist .ybar:focus-visible rect.hit{stroke:var(--accent);stroke-width:1.5}
+
 .tip{position:fixed;z-index:20;pointer-events:none;background:var(--ink);color:var(--surface);font-size:12.5px;line-height:1.35;padding:7px 10px;border-radius:7px;max-width:260px;box-shadow:var(--shadow)}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:9px;font-size:14px;max-width:min(520px,calc(100vw - 32px));box-shadow:var(--shadow)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
@@ -232,7 +281,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
-<div class="wrap">
+<div class="wrap" id="wrap">
   <nav class="pages" id="pagesNav" aria-label="Pages" hidden></nav>
   <header class="top">
     <div class="title-block">
@@ -259,7 +308,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     <button class="btn" type="button" id="showHowto">How to export</button>
   </div>
 
-  <details class="howto" id="howto">
+  <details class="howto only-list" id="howto">
     <summary>Load your real library</summary>
     <ol class="steps">
       <li><b>Get a Steam Web API key</b> at <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a>. Any domain name works for the form.</li>
@@ -272,7 +321,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     </ol>
   </details>
 
-  <section class="overview" aria-label="Library overview">
+  <section class="overview only-list" aria-label="Library overview">
     <div class="panel">
       <div class="panel-head">
         <h2>How much you've played</h2>
@@ -291,7 +340,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     </div>
   </section>
 
-  <section style="display:flex;flex-direction:column;gap:14px" aria-labelledby="picksH">
+  <section class="only-list" style="display:flex;flex-direction:column;gap:14px" aria-labelledby="picksH">
     <div class="section-head">
       <div style="display:flex;flex-direction:column;gap:4px">
         <h2 id="picksH">Couch picks</h2>
@@ -339,7 +388,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
           <option value="all">Everything</option>
         </select>
       </div>
-      <div class="field">
+      <div class="field only-list">
         <label for="sort">Sort</label>
         <select id="sort">
           <option value="score">Couch score</option>
@@ -356,7 +405,15 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
       <div class="fgrid" id="fbody"></div>
     </details>
     <div class="count-line"><span id="countLine"></span><button class="linkish" type="button" id="clearBtn">Clear all</button></div>
-    <div class="list" id="list"></div>
+    <div class="list only-list" id="list"></div>
+    <div class="only-stats" id="statsSec">
+      <div class="tiles" id="statTiles"></div>
+      <div class="statbar">
+        <div class="seg" role="group" aria-label="Measure for the bars" id="metricSeg"></div>
+        <p class="fhint" id="statNote"></p>
+      </div>
+      <div class="scards" id="statCards"></div>
+    </div>
   </section>
 
   <footer id="foot">Deck ratings come from Valve's Steam Deck compatibility program. Length estimates come from HowLongToBeat's community averages for the main story; the lighter part of each bar is the main story plus extras. Data is as of the export date shown at the top.</footer>
@@ -444,6 +501,11 @@ const SAMPLE = [
 ];
 
 // ---------------------------------------------------------------- state
+// The page has two modes of one file: the list at "/" and the statistics at "/stats" (or "/stats/"). Both read and
+// write the same filters and URL hash. API() gives a path that works from either URL.
+const MODE = /\/stats\/?$/.test(location.pathname) ? "stats" : "list";
+const BASE = MODE === "stats" ? location.pathname.replace(/stats\/?$/, "") : "";
+const API = (path) => BASE + path;
 const S = {
   games: [],
   byId: new Map(),
@@ -462,9 +524,16 @@ const S = {
   noteDraft: new Map(),      // unsaved note text, kept across re-renders
   focusNote: null,
   shown: PAGE,
+  pubLabels: new Map(),      // key -> label, for the statistics
+  devLabels: new Map(),
   pubGroups: new Map(),      // normalized publisher key -> { key, label, n }, for the whole library
   devGroups: new Map(),
   pickQ: { pub: "", dev: "" }, // text typed in the publisher / developer pickers
+  metric: "games",           // statistics: games | hours | never
+  statShow: { gen: false, pub: false, dev: false }, // statistics: "Show all" expanded
+  statQ: { pub: "", dev: "" },                      // statistics: text typed in the publisher / developer search
+  yearStep: 1,               // statistics: 1 = by year, 10 = by decade
+  stats: null,               // the last statsFor() result
   f: null,                   // filter state, set below
 };
 const $ = (id) => document.getElementById(id);
@@ -574,6 +643,145 @@ function isUnknown(g, k) {
   }
   return false;
 }
+// ---- statistics
+const STAT_LABELS = {
+  deck: { 3: "Verified", 2: "Playable", 1: "Unsupported", 0: "Unknown" },
+  pt: { native: "Native", platinum: "Platinum", gold: "Gold", silver: "Silver", bronze: "Bronze", borked: "Borked", pending: "Pending" },
+  ctrl: { full: "Full", partial: "Partial", none: "None listed" },
+  len: { short: "Under 5 h", mid: "5–15 h", long: "15–40 h", epic: "40 h+" },
+  lane: { none: "No lane", next: "Up next", someday: "Someday", skip: "Skipped", done: "Finished" },
+};
+const LEN_ORDER = ["short", "mid", "long", "epic"];
+const LANE_ORDER = ["next", "someday", "skip", "done"];
+const STAT_METRICS = ["games", "hours", "never"];
+function lenBucketBy(g, src) {
+  const h = mainLen(g, src);
+  if (h === null) return null;
+  return h < 5 ? "short" : h < 15 ? "mid" : h < 40 ? "long" : "epic";
+}
+function median(xs) {
+  if (!xs.length) return null;
+  const a = xs.slice().sort((x, y) => x - y), m = a.length >> 1;
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+// statsFor(games, { dsrc, laneOf, pubLabels, devLabels }) -> plain object. Pure: it never touches the page.
+//   tiles: totals for the set. dims.<name> = { rows, unknown, known, total }:
+//   rows are { key, label, n, minutes, never, tried, played } (n games; a game with several genres, publishers or
+//   developers is counted once under each); unknown is the same shape or null; known counts games with a value.
+function statsFor(games, opts) {
+  const o = opts || {};
+  const dsrc = ["main", "extra", "complete"].includes(o.dsrc) ? o.dsrc : "main";
+  const laneOf = typeof o.laneOf === "function" ? o.laneOf : () => "";
+  const pubLabels = o.pubLabels || new Map([...nameGroups(games, "pub")].map(([k, e]) => [k, e.label]));
+  const devLabels = o.devLabels || new Map([...nameGroups(games, "dev")].map(([k, e]) => [k, e.label]));
+  const row = (key, label) => ({ key, label, n: 0, minutes: 0, never: 0, tried: 0, played: 0 });
+  const dims = {};
+  for (const d of ["gen", "pub", "dev", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]) {
+    dims[d] = { rows: new Map(), unknown: null, known: 0, total: games.length };
+  }
+  const bump = (r, g, st) => { r.n++; r.minutes += g.playtime; r[st]++; };
+  const put = (d, key, label, g, st) => {
+    let r = dims[d].rows.get(key);
+    if (!r) dims[d].rows.set(key, (r = row(key, label)));
+    bump(r, g, st);
+  };
+  const unk = (d, key, label, g, st) => { const dim = dims[d]; if (!dim.unknown) dim.unknown = row(key, label); bump(dim.unknown, g, st); };
+  const tiles = { games: games.length, minutes: 0, deckMinutes: 0, never: 0, tried: 0, played: 0,
+                  backlogGames: 0, backlogWithTime: 0, backlogHours: 0, mcMedian: null, mcCount: 0, rvMedian: null, rvCount: 0 };
+  const mcs = [], rvs = [];
+  for (const g of games) {
+    const st = playState(g), ln = laneOf(g) || "";
+    tiles.minutes += g.playtime; tiles.deckMinutes += g.deckPlaytime || 0; tiles[st]++;
+    if (st !== "played" && ln !== "skip" && ln !== "done") {
+      tiles.backlogGames++;
+      const h = mainLen(g, dsrc);
+      if (h !== null) { tiles.backlogWithTime++; tiles.backlogHours += h; }
+    }
+    if (g.metacritic) mcs.push(g.metacritic);
+    if (g.reviews && g.reviews.total > 0 && g.reviews.pct !== null) rvs.push(g.reviews.pct);
+
+    const genres = [...new Set(g.genres || [])];
+    if (genres.length) { dims.gen.known++; genres.forEach((x) => put("gen", x, x, g, st)); } else unk("gen", "", "Unknown", g, st);
+    if (g.pubKeys.length) { dims.pub.known++; g.pubKeys.forEach((k) => put("pub", k, pubLabels.get(k) || k, g, st)); } else unk("pub", "", "Unknown", g, st);
+    if (g.devKeys.length) { dims.dev.known++; g.devKeys.forEach((k) => put("dev", k, devLabels.get(k) || k, g, st)); } else unk("dev", "", "Unknown", g, st);
+    if (g.deck) { dims.deck.known++; put("deck", g.deck, STAT_LABELS.deck[g.deck], g, st); } else unk("deck", 0, STAT_LABELS.deck[0], g, st);
+    const tier = g.proton && TIERS.includes(g.proton.tier) ? g.proton.tier : null;
+    if (tier) { dims.pt.known++; put("pt", tier, STAT_LABELS.pt[tier], g, st); } else unk("pt", "", "Unknown", g, st);
+    if (isUnknown(g, "ctrl")) unk("ctrl", "", "Unknown", g, st);
+    else { const c = g.controller || "none"; dims.ctrl.known++; put("ctrl", c, STAT_LABELS.ctrl[c], g, st); }
+    const lb = lenBucketBy(g, dsrc);
+    if (lb) { dims.len.known++; put("len", lb, STAT_LABELS.len[lb], g, st); } else unk("len", "none", "No HLTB time", g, st);
+    if (ln) { dims.lane.known++; put("lane", ln, STAT_LABELS.lane[ln], g, st); } else unk("lane", "none", STAT_LABELS.lane.none, g, st);
+    const mb = mcBucket(g);
+    if (mb) { dims.mc.known++; put("mc", mb, MC_BUCKETS.find((b) => b[0] === mb)[1], g, st); } else unk("mc", "", "Unknown", g, st);
+    const rb = reviewBucket(g);
+    if (rb) { dims.rv.known++; put("rv", rb, REVIEW_LEVELS.find((l) => l[0] === rb)[1], g, st); } else unk("rv", "", "Unknown", g, st);
+    if (g.year) { dims.year.known++; put("year", g.year, String(g.year), g, st); } else unk("year", "", "Unknown", g, st);
+  }
+  tiles.backlogHours = Math.round(tiles.backlogHours * 10) / 10;
+  tiles.mcMedian = median(mcs); tiles.mcCount = mcs.length;
+  tiles.rvMedian = median(rvs); tiles.rvCount = rvs.length;
+
+  const byCount = (a, b) => b.n - a.n || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0);
+  const ordered = (d, order) => order.filter((k) => dims[d].rows.has(k)).map((k) => dims[d].rows.get(k));
+  const out = {};
+  for (const d of ["gen", "pub", "dev"]) out[d] = { rows: [...dims[d].rows.values()].sort(byCount) };
+  out.deck = { rows: ordered("deck", [3, 2, 1]) };
+  out.pt = { rows: ordered("pt", TIERS) };
+  out.ctrl = { rows: ordered("ctrl", ["full", "partial", "none"]) };
+  out.len = { rows: ordered("len", LEN_ORDER) };
+  out.lane = { rows: ordered("lane", LANE_ORDER) };
+  out.mc = { rows: MC_BUCKETS.map((b) => b[0]).filter((k) => dims.mc.rows.has(k)).map((k) => dims.mc.rows.get(k)) };
+  out.rv = { rows: REVIEW_KEYS.filter((k) => dims.rv.rows.has(k)).map((k) => dims.rv.rows.get(k)) };
+  const years = [...dims.year.rows.keys()];
+  const yrows = [];
+  if (years.length) {
+    for (let y = Math.min(...years); y <= Math.max(...years); y++) yrows.push(dims.year.rows.get(y) || row(y, String(y)));
+  }
+  out.year = { rows: yrows };
+  for (const d of Object.keys(out)) { out[d].unknown = dims[d].unknown; out[d].known = dims[d].known; out[d].total = games.length; }
+  return { tiles, dims: out };
+}
+// Release years grouped into decades (1990s, 2000s...). step 1 returns the rows as they are.
+function yearBuckets(rows, step) {
+  if (step !== 10) return rows;
+  const m = new Map();
+  for (const r of rows) {
+    const k = Math.floor(r.key / 10) * 10;
+    let e = m.get(k);
+    if (!e) m.set(k, (e = { key: k, label: k + "s", n: 0, minutes: 0, never: 0, tried: 0, played: 0 }));
+    e.n += r.n; e.minutes += r.minutes; e.never += r.never; e.tried += r.tried; e.played += r.played;
+  }
+  return [...m.values()].sort((a, b) => a.key - b.key);
+}
+function metricValue(r, metric) {
+  return metric === "hours" ? r.minutes / 60 : metric === "never" ? (r.n ? (100 * r.never) / r.n : 0) : r.n;
+}
+// Highest first; ties go to the bigger group, then A to Z.
+function rankRows(rows, metric) {
+  return rows.slice().sort((a, b) => metricValue(b, metric) - metricValue(a, metric) || b.n - a.n || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+}
+// The first `top` rows plus one folded row for the rest. A game with several values counts in each, so the folded
+// row's counts are the sum of its rows.
+function foldRows(rows, top) {
+  if (rows.length <= top) return { rows, other: null };
+  const other = { key: "", label: "Other", values: rows.length - top, n: 0, minutes: 0, never: 0, tried: 0, played: 0 };
+  for (const r of rows.slice(top)) { other.n += r.n; other.minutes += r.minutes; other.never += r.never; other.tried += r.tried; other.played += r.played; }
+  return { rows: rows.slice(0, top), other };
+}
+function csvCell(v) {
+  const s = String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+// One breakdown as CSV text: a header, one line per row, and the unknown row last.
+function statsCsv(dim, rows) {
+  const head = ["value", "games", "hours_played", "never_launched", "tried", "played_2h_plus", "percent_never_launched"];
+  const line = (r, label) => [label, r.n, Math.round((r.minutes / 60) * 10) / 10, r.never, r.tried, r.played, r.n ? Math.round((1000 * r.never) / r.n) / 10 : 0].map(csvCell).join(",");
+  const out = [head.join(",")];
+  for (const r of rows) out.push(line(r, r.label));
+  if (dim.unknown) out.push(line(dim.unknown, "Unknown"));
+  return out.join("\n") + "\n";
+}
 // </stats-core>
 
 // ---------------------------------------------------------------- filter state
@@ -672,13 +880,19 @@ function loadInitialFilters() {
   try { return clean(JSON.parse(localStorage.getItem("bt-filters") || "null") || {}); } catch (e) { return clean({}); }
 }
 function saveFilters() { try { localStorage.setItem("bt-filters", JSON.stringify({ ...S.f, q: "" })); } catch (e) {} }
+// Links between the list and the statistics carry the current filters in their hash.
+function syncNavHash() {
+  document.querySelectorAll("#pagesNav a[data-keep]").forEach((a) => { a.setAttribute("href", a.dataset.keep + location.hash); });
+}
 function writeHash() {
   const s = filtersToParams(S.f).toString();
   try { history.replaceState(null, "", s ? "#" + s : location.pathname + location.search); } catch (e) {}
+  syncNavHash();
 }
 S.f = loadInitialFilters();
 window.addEventListener("hashchange", () => {
   S.f = loadInitialFilters();
+  syncNavHash();
   render();
 });
 
@@ -876,6 +1090,8 @@ function setLibrary(games, source, meta) {
   games.forEach(annotateNames);
   S.pubGroups = nameGroups(games, "pub");
   S.devGroups = nameGroups(games, "dev");
+  S.pubLabels = new Map([...S.pubGroups].map(([k, e]) => [k, e.label]));
+  S.devLabels = new Map([...S.devGroups].map(([k, e]) => [k, e.label]));
   S.games = games;
   S.byId = new Map(games.map((g) => [g.appid, g]));
   S.source = source;
@@ -887,6 +1103,7 @@ function setLibrary(games, source, meta) {
 // ---------------------------------------------------------------- render
 function render() {
   renderHeader();
+  if (MODE === "stats") { renderStats(); return; }
   renderOverview();
   renderPicks();
   renderAsk();
@@ -1039,9 +1256,11 @@ function renderPicks() {
     `<div class="panel" style="grid-column:1/-1"><p>${msg}</p></div>`;
 }
 
-function filtered() {
+// The games the view, the filter panel and the search box select, in library order. The list sorts them; the
+// statistics count them.
+function selected() {
   const f = S.f, q = f.q.trim().toLowerCase();
-  let out = S.games.filter((g) => {
+  return S.games.filter((g) => {
     const ln = lane(g), st = playState(g);
     switch (f.view) {
       case "backlog": if (!inBacklog(g)) return false; break;
@@ -1054,6 +1273,10 @@ function filtered() {
     if (q && !(g.name.toLowerCase().includes(q) || g.genres.some((x) => x.toLowerCase().includes(q)))) return false;
     return true;
   });
+}
+function filtered() {
+  const f = S.f;
+  let out = selected();
   if (f.view === "next" && canEdit()) {
     return out.sort((a, b) => orderIndex(a) - orderIndex(b) || score(b) - score(a) || a.name.localeCompare(b.name));
   }
@@ -1155,10 +1378,13 @@ function renderPanel() {
   $("fcount").textContent = n ? `${n} on` : "";
 }
 
+function syncControls() {
+  renderPanel();
+  $("q").value = S.f.q; $("view").value = S.f.view; $("sort").value = S.f.sort;
+}
 function renderList() {
   const f = S.f;
-  renderPanel();
-  $("q").value = f.q; $("view").value = f.view; $("sort").value = f.sort;
+  syncControls();
   const rows = filtered();
   const vis = rows.slice(0, S.shown);
   const n = activeCount();
@@ -1187,6 +1413,194 @@ function renderList() {
     S.focusNote = null;
     if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   }
+}
+
+// ---------------------------------------------------------------- statistics view
+const STAT_CARDS = [
+  { d: "gen", title: "Genre", noun: "Genre", rank: true },
+  { d: "pub", title: "Publisher", noun: "Publisher", rank: true, search: true },
+  { d: "dev", title: "Developer", noun: "Developer", rank: true, search: true },
+  { d: "deck", title: "Steam Deck rating", noun: "Deck rating" },
+  { d: "pt", title: "ProtonDB tier", noun: "ProtonDB tier" },
+  { d: "ctrl", title: "Controller support", noun: "Controller support" },
+  { d: "len", title: "Length (HowLongToBeat)", noun: "Length" },
+  { d: "lane", title: "Triage lane", noun: "Triage lane" },
+  { d: "mc", title: "Metacritic", noun: "Metacritic" },
+  { d: "rv", title: "Steam user reviews", noun: "Steam reviews" },
+  { d: "year", title: "Release year", noun: "Release year", wide: true },
+];
+const STAT_TOP = 15;
+const METRIC_LABELS = { games: "Games", hours: "Hours played", never: "% never launched" };
+const fmtHours = (h) => (h >= 100 ? Math.round(h) : Math.round(h * 10) / 10).toLocaleString() + " h";
+const pctNever = (r) => (r.n ? Math.round((100 * r.never) / r.n) : 0);
+function statValue(r) {
+  return S.metric === "hours" ? fmtHours(r.minutes / 60) : S.metric === "never" ? pctNever(r) + "%" : r.n.toLocaleString();
+}
+function statAria(r) {
+  return `${r.label}: ${r.n.toLocaleString()} ${r.n === 1 ? "game" : "games"}, ${fmtHours(r.minutes / 60)} played, ${pctNever(r)}% never launched`;
+}
+function statRowHtml(d, r, max, o) {
+  const opt = o || {};
+  const v = metricValue(r, S.metric);
+  const w = max ? Math.min(100, (v / max) * 100) : 0;
+  const split = `<span class="ssplit" aria-hidden="true"><i class="s-never" style="flex:${r.never}"></i><i class="s-tried" style="flex:${r.tried}"></i><i class="s-played" style="flex:${r.played}"></i></span>`;
+  const inner = `<span class="sl">${esc(r.label)}</span><span class="smid"><span class="sbar" aria-hidden="true"><i style="width:${w.toFixed(1)}%"></i></span>${split}</span><span class="sv num">${esc(statValue(r))}</span>`;
+  if (opt.other) return `<div class="srow other" title="${esc(opt.other)}">${inner}</div>`;
+  return `<button type="button" class="srow${opt.unknown ? " unk" : ""}" data-sd="${d}" data-sk="${esc(r.key)}"${opt.unknown ? ' data-su="1"' : ""} data-n="${r.n}" aria-label="${esc(statAria(r))}. Show these games in the list.">${inner}</button>`;
+}
+// The rows a card shows: searched, ranked (genre, publisher, developer), folded to the top 15 unless expanded.
+function cardRowsHtml(c) {
+  const dim = S.stats.dims[c.d];
+  let rows = dim.rows, other = null, q = "";
+  if (c.rank) {
+    q = c.search ? S.statQ[c.d].trim().toLowerCase() : "";
+    if (q) rows = rows.filter((r) => r.label.toLowerCase().includes(q));
+    rows = rankRows(rows, S.metric);
+    if (!q && !S.statShow[c.d]) ({ rows, other } = foldRows(rows, STAT_TOP));
+    if (q) rows = rows.slice(0, 100);
+  }
+  const unk = !q && dim.unknown && dim.unknown.n ? dim.unknown : null;
+  const all = rows.concat(unk ? [unk] : []);
+  const max = S.metric === "never" ? 100 : Math.max(0, ...all.map((r) => metricValue(r, S.metric)));
+  let html = rows.map((r) => statRowHtml(c.d, r, max)).join("");
+  if (other) html += statRowHtml(c.d, other, max, { other: `${other.values} more ${c.title.toLowerCase()} values. Games with several values count under each.` }).replace(">Other<", `>Other (${other.values})<`);
+  if (unk) html += statRowHtml(c.d, unk, max, { unknown: true });
+  if (!html) html = `<p class="fhint">${q ? "No match." : "Nothing here."}</p>`;
+  if (c.rank && !q && dim.rows.length > STAT_TOP) {
+    html += `<div><button type="button" class="linkish" data-showall="${c.d}">${S.statShow[c.d] ? `Show the top ${STAT_TOP}` : `Show all ${dim.rows.length.toLocaleString()}`}</button></div>`;
+  }
+  return html;
+}
+// Release year as an SVG histogram (by year or decade). Each bar is a keyboard-reachable button.
+function yearChartHtml() {
+  const dim = S.stats.dims.year;
+  const rows = yearBuckets(dim.rows, S.yearStep);
+  if (!rows.length) return `<p class="fhint">Nothing here.</p>`;
+  const W = 640, H = 150, top = 16, bottom = 20, left = 4, right = 4;
+  const vmax = Math.max(1e-9, ...rows.map((r) => metricValue(r, S.metric)));
+  const bw = (W - left - right) / rows.length, ih = H - top - bottom;
+  const every = Math.ceil(rows.length / 12);
+  let bars = "", labels = "";
+  rows.forEach((r, i) => {
+    const x = left + i * bw, v = metricValue(r, S.metric), h = Math.max(r.n ? 2 : 0, (v / vmax) * ih);
+    if (r.n) {
+      bars += `<g class="ybar" role="button" tabindex="0" data-sd="year" data-sk="${r.key}" data-step="${S.yearStep}" data-n="${r.n}" aria-label="${esc(statAria(r))}. Show these games in the list.">` +
+        `<title>${esc(statAria(r))}</title><rect class="hit" x="${x.toFixed(1)}" y="${top}" width="${bw.toFixed(1)}" height="${ih}"></rect>` +
+        `<rect class="v" x="${(x + 1).toFixed(1)}" y="${(top + ih - h).toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="2"></rect></g>`;
+    }
+    if (i % every === 0 || i === rows.length - 1) labels += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle">${esc(r.label)}</text>`;
+  });
+  const topRow = rows.reduce((a, b) => (metricValue(b, S.metric) > metricValue(a, S.metric) ? b : a));
+  const unk = dim.unknown && dim.unknown.n ? statRowHtml("year", dim.unknown, S.metric === "never" ? 100 : vmax, { unknown: true }) : "";
+  return `<svg class="yhist" viewBox="0 0 ${W} ${H}" role="group" aria-label="Release years, by ${S.yearStep === 10 ? "decade" : "year"}">${bars}${labels}` +
+    `<text x="${left}" y="10">${esc(statValue(topRow))}</text></svg>${unk}`;
+}
+function tileHtml(k, v, small) {
+  return `<div class="tile"><span class="tk">${esc(k)}</span><span class="tv num">${v}</span>${small ? `<small>${small}</small>` : ""}</div>`;
+}
+function renderStats() {
+  syncControls();
+  $("listH").textContent = "Statistics";
+  const rows = selected();
+  const t0 = performance.now();
+  S.stats = statsFor(rows, { dsrc: S.f.dsrc, laneOf: lane, pubLabels: S.pubLabels, devLabels: S.devLabels });
+  S.lastStatsMs = performance.now() - t0;
+  window.__statsMs = S.lastStatsMs;
+  const t = S.stats.tiles, n = rows.length, nf = (x) => x.toLocaleString();
+  const pct = (x) => (n ? Math.round((100 * x) / n) : 0) + "%";
+  const filters = activeCount();
+  $("clearBtn").hidden = !(filters > 0 || S.f.view !== "backlog");
+  $("countLine").textContent = `${nf(n)} ${n === 1 ? "game" : "games"} in this view` + (filters ? ` · ${filters} filter${filters === 1 ? "" : "s"} on` : "");
+  $("metricSeg").innerHTML = STAT_METRICS.map((m) => `<button type="button" data-metric="${m}" aria-pressed="${S.metric === m}">${METRIC_LABELS[m]}</button>`).join("");
+  $("statNote").textContent = "The thin strip under each bar splits those games into never launched, tried (under 2 h) and played (2 h or more). " +
+    "A game with several genres, publishers or developers counts under each. Click a row to see its games in the list.";
+  if (!n) {
+    $("statTiles").innerHTML = "";
+    $("statCards").innerHTML = `<div class="panel" style="grid-column:1/-1"><p>No games match these filters.</p></div>`;
+    return;
+  }
+  const lenName = { main: "main story", extra: "main + extras", complete: "completionist" }[S.f.dsrc];
+  $("statTiles").innerHTML = [
+    tileHtml("Games in this view", nf(n), n !== S.games.length ? `of ${nf(S.games.length)} in the library` : ""),
+    tileHtml("Time played", fmtHours(t.minutes / 60), `${fmtHours(t.deckMinutes / 60)} on the Deck`),
+    tileHtml("Never launched", nf(t.never), pct(t.never) + " of the games"),
+    tileHtml("Tried (under 2 h)", nf(t.tried), pct(t.tried) + " of the games"),
+    tileHtml("Played 2 h or more", nf(t.played), pct(t.played) + " of the games"),
+    tileHtml("Backlog length", t.backlogWithTime ? fmtHours(t.backlogHours) : "No data",
+      `${lenName}; ${nf(t.backlogWithTime)} of ${nf(t.backlogGames)} backlog games have a time`),
+    tileHtml("Median Metacritic", t.mcMedian === null ? "None" : String(Math.round(t.mcMedian * 10) / 10), `${nf(t.mcCount)} games have a score`),
+    tileHtml("Median Steam review", t.rvMedian === null ? "None" : Math.round(t.rvMedian) + "%", `${nf(t.rvCount)} games with reviews`),
+  ].join("");
+  $("statCards").innerHTML = STAT_CARDS.map((c) => {
+    const dim = S.stats.dims[c.d];
+    const cov = c.d === "lane" ? `Triaged: ${nf(dim.known)} of ${nf(dim.total)}` : `${c.noun} known for ${nf(dim.known)} of ${nf(dim.total)}`;
+    const search = c.search ? `<input type="search" data-sq="${c.d}" placeholder="Search ${c.title.toLowerCase()}s" value="${esc(S.statQ[c.d])}" autocomplete="off" aria-label="Search ${c.title.toLowerCase()}s">` : "";
+    const yearTools = c.d === "year"
+      ? `<span class="seg" role="group" aria-label="Group years">${[[1, "By year"], [10, "By decade"]].map(([v, l]) => `<button type="button" data-ystep="${v}" aria-pressed="${S.yearStep === v}">${l}</button>`).join("")}</span>` : "";
+    return `<section class="scard${c.wide ? " wide" : ""}" aria-label="${esc(c.title)}">
+      <div class="scard-head"><h3>${esc(c.title)}</h3><span class="scard-tools"><span class="cov num">${esc(cov)}</span>${yearTools}<button type="button" class="linkish" data-csv="${c.d}">Copy as CSV</button></span></div>
+      ${search}
+      <div class="srows" id="srows-${c.d}">${c.d === "year" ? yearChartHtml() : cardRowsHtml(c)}</div>
+    </section>`;
+  }).join("");
+}
+
+// A stats row, turned into the filter state that lists exactly its games. The statistics already describe the
+// filtered set, so a row's own value replaces the old values of its dimension (genre: it is added, and "all of
+// these" is switched on, so the list is still inside the set).
+const UNK_DIM = { gen: "gen", pub: "pub", dev: "dev", pt: "pt", ctrl: "ctrl", mc: "mc", rv: "rv", year: "yr" };
+function rowFilter(dim, key, unknown, step) {
+  const f = clean(S.f);
+  const noUnk = (d) => { f.unk = f.unk.filter((x) => x !== d); };
+  if (unknown && UNK_DIM[dim]) {
+    const d = UNK_DIM[dim];
+    for (const k of UNK_FIELDS[d]) f[k] = Array.isArray(DEFAULT_F[k]) ? [] : DEFAULT_F[k];
+    noUnk(d); f.unk.push(d);
+    return clean(f);
+  }
+  switch (dim) {
+    case "gen":
+      if (!f.gen.includes(key)) f.gen.push(key);
+      if (f.gen.length > 1) f.gm = "all";
+      f.genUnk = false; noUnk("gen"); break;
+    case "pub": f.pub = [key]; f.pubUnk = false; noUnk("pub"); break;
+    case "dev": f.dev = [key]; f.devUnk = false; noUnk("dev"); break;
+    case "deck": f.deck = [Number(key)]; break;
+    case "pt": f.pt = [key]; f.ptUnk = false; noUnk("pt"); break;
+    case "ctrl": f.ctrl = [key]; f.ctrlUnk = false; noUnk("ctrl"); break;
+    case "lane": f.lane = [key]; break;
+    case "rv": f.rv = [key]; f.rvUnk = false; noUnk("rv"); break;
+    case "len":
+      f.durUnk = false;
+      if (key === "none") { f.dnone = true; f.dmin = null; f.dmax = null; }
+      else { f.dnone = false; f.dmin = DUR_PRESET[key].dmin; f.dmax = DUR_PRESET[key].dmax; }
+      break;
+    case "mc": {
+      const b = MC_BUCKETS.find((x) => x[0] === key);
+      f.mc = b[2]; f.mcmax = b[3]; f.mcUnk = false; noUnk("mc"); break;
+    }
+    case "year": {
+      const y = Number(key);
+      f.ymin = y; f.ymax = step === "10" ? y + 9 : y; f.yrUnk = false; noUnk("yr"); break;
+    }
+  }
+  return clean(f);
+}
+function statRowClick(el) {
+  S.f = rowFilter(el.dataset.sd, el.dataset.sk, el.dataset.su === "1", el.dataset.step);
+  saveFilters();
+  const h = filtersToParams(S.f).toString();
+  location.assign(BASE + (h ? "#" + h : ""));
+}
+function copyPlain(text, btn) {
+  const done = () => { const o = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = o), 1400); };
+  try { navigator.clipboard.writeText(text).then(done, () => toast("Couldn't copy to the clipboard.")); } catch (e) { toast("Couldn't copy to the clipboard."); }
+}
+function csvFor(d) {
+  const c = STAT_CARDS.find((x) => x.d === d), dim = S.stats.dims[d];
+  let rows = d === "year" ? yearBuckets(dim.rows, S.yearStep) : dim.rows;
+  if (c.rank) rows = rankRows(rows, S.metric);
+  return statsCsv(dim, rows);
 }
 
 // ---------------------------------------------------------------- interactions
@@ -1227,8 +1641,14 @@ document.addEventListener("change", (e) => {
 $("showHowto").addEventListener("click", () => { $("howto").open = true; $("howto").scrollIntoView({ behavior: "smooth", block: "start" }); });
 
 document.addEventListener("click", (e) => {
+  const sd = e.target.closest("[data-sd]");
+  if (sd) { statRowClick(sd); return; }
   const t = e.target.closest("button");
   if (!t) return;
+  if (t.dataset.metric !== undefined) { S.metric = t.dataset.metric; try { localStorage.setItem("bt-metric", S.metric); } catch (x) {} renderStats(); return; }
+  if (t.dataset.showall !== undefined) { S.statShow[t.dataset.showall] = !S.statShow[t.dataset.showall]; renderStats(); return; }
+  if (t.dataset.ystep !== undefined) { S.yearStep = Number(t.dataset.ystep); renderStats(); return; }
+  if (t.dataset.csv !== undefined) { copyPlain(csvFor(t.dataset.csv), t); return; }
   if (t.dataset.lane) { setLane(Number(t.dataset.appid), t.dataset.lane); return; }
   if (t.dataset.fa !== undefined) { toggleArr(t.dataset.fa, t.dataset.fv); return; }
   if (t.classList.contains("cell") && t.dataset.deck !== undefined) {
@@ -1260,8 +1680,16 @@ function selectCode(btn) {
   toast("Selected. Press Ctrl+C or ⌘C to copy.");
 }
 
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const bar = e.target.closest && e.target.closest("g[data-sd]");
+  if (bar) { e.preventDefault(); statRowClick(bar); }
+});
+
 // Note drafts and drag-to-reorder (self-hosted only)
 document.addEventListener("input", (e) => {
+  const sq = e.target.dataset && e.target.dataset.sq;
+  if (sq) { S.statQ[sq] = e.target.value.slice(0, 80); $("srows-" + sq).innerHTML = cardRowsHtml(STAT_CARDS.find((c) => c.d === sq)); return; }
   const field = e.target.dataset && e.target.dataset.ps;
   if (field) { S.pickQ[field] = e.target.value.slice(0, 80); $("opts-" + field).innerHTML = pickerOptions(field); return; }
   const id = e.target.dataset && e.target.dataset.noteFor;
@@ -1322,7 +1750,7 @@ function applyNextOrder(ids) {
   S.order = ids;
   renderList();
   const job = (queues.get("order") || Promise.resolve()).then(async () => {
-    const r = await fetch("api/order", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: ids }) });
+    const r = await fetch(API("api/order"), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: ids }) });
     if (!r.ok) throw new Error("HTTP " + r.status);
   }).catch(() => {
     S.order = prev; renderList();
@@ -1338,7 +1766,7 @@ function saveNote(id) {
   S.noteOpen.delete(id); S.noteDraft.delete(id);
   renderList();
   const job = (queues.get("notes") || Promise.resolve()).then(async () => {
-    const r = await fetch("api/notes", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appid: id, note: text }) });
+    const r = await fetch(API("api/notes"), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appid: id, note: text }) });
     if (!r.ok) throw new Error("HTTP " + r.status);
   }).catch(() => {
     if (prev) S.notes.set(id, prev); else S.notes.delete(id);
@@ -1387,7 +1815,7 @@ function setLane(appid, laneKey) {
   render();
   if (S.source === "server") {
     const job = (queues.get("server") || Promise.resolve()).then(async () => {
-      const r = await fetch("api/triage", { method: "PUT", headers: { "Content-Type": "application/json" },
+      const r = await fetch(API("api/triage"), { method: "PUT", headers: { "Content-Type": "application/json" },
                                             body: JSON.stringify({ appid, lane: next }) });
       if (!r.ok) throw new Error("HTTP " + r.status);
     }).catch(() => {
@@ -1430,7 +1858,7 @@ $("fileInput").addEventListener("change", async (e) => {
   const meta = { exportedAt: data.exportedAt || new Date().toISOString(), persona: data.persona || null, steamid: data.steamid || null };
   if (S.server) {
     try {
-      const r = await fetch("api/library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+      const r = await fetch(API("api/library"), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
       if (!r.ok) throw new Error("HTTP " + r.status);
       setLibrary(games, "server", meta);
       toast(`Saved ${games.length.toLocaleString()} games to the server.`);
@@ -1557,27 +1985,27 @@ function renderAsk() {
 // On claude.ai these requests simply fail, and the page falls back to the artifact database.
 async function bootServer() {
   let r;
-  try { r = await fetch("api/library", { cache: "no-store" }); } catch (e) { return false; }
+  try { r = await fetch(API("api/library"), { cache: "no-store" }); } catch (e) { return false; }
   if (!r.headers.get("X-Backlog-Server")) return false;
   S.server = true;
   S.api = Number(r.headers.get("X-Backlog-Api")) || 1;
   // Optional header links, configured on the server with --nav LABEL=URL.
   const links = ((window.APP_CONFIG || {}).nav || []).filter((l) => l && l.label && l.url);
-  if (links.length) {
-    $("pagesNav").innerHTML = `<a href="./" aria-current="page">Backlog</a>` +
-      links.map((l) => `<a href="${esc(l.url)}">${esc(l.label)}</a>`).join("");
-    $("pagesNav").hidden = false;
-  }
+  const mine = [["Backlog", BASE || "./", MODE === "list"], ["Stats", BASE + "stats", MODE === "stats"]];
+  $("pagesNav").innerHTML = mine.map(([label, href, cur]) => `<a href="${esc(href)}" data-keep="${esc(href)}"${cur ? ' aria-current="page"' : ""}>${label}</a>`).join("") +
+    links.map((l) => `<a href="${esc(l.url)}">${esc(l.label)}</a>`).join("");
+  $("pagesNav").hidden = false;
+  syncNavHash();
   try {
-    const t = await fetch("api/triage", { cache: "no-store" });
+    const t = await fetch(API("api/triage"), { cache: "no-store" });
     if (t.ok) S.triage = new Map(Object.entries(await t.json()).map(([k, v]) => [Number(k), v]));
   } catch (e) {}
   try {
-    const n = await fetch("api/notes", { cache: "no-store" });
+    const n = await fetch(API("api/notes"), { cache: "no-store" });
     if (n.ok) S.notes = new Map(Object.entries(await n.json()).map(([k, v]) => [Number(k), String(v)]));
   } catch (e) {}
   try {
-    const o = await fetch("api/order", { cache: "no-store" });
+    const o = await fetch(API("api/order"), { cache: "no-store" });
     if (o.ok) { const arr = await o.json(); if (Array.isArray(arr)) S.order = arr.map(Number); }
   } catch (e) {}
   if (r.ok) {
@@ -1616,7 +2044,7 @@ function showRefresh(st) {
   $("refreshLabel").textContent = running ? refreshText(st) : "Refresh library";
 }
 async function reloadLibrary() {
-  const r = await fetch("api/library", { cache: "no-store" });
+  const r = await fetch(API("api/library"), { cache: "no-store" });
   if (!r.ok) throw new Error("library " + r.status);
   const data = await r.json();
   setLibrary((data.games || []).map(normalizeGame), "server",
@@ -1626,7 +2054,7 @@ async function pollRefresh() {
   clearTimeout(refreshTimer);
   let st;
   try {
-    const r = await fetch("api/export/status", { cache: "no-store" });
+    const r = await fetch(API("api/export/status"), { cache: "no-store" });
     if (r.status === 501) { $("refreshBtn").hidden = true; refreshWatching = false; return; }
     if (!r.ok) throw new Error(String(r.status));
     st = await r.json();
@@ -1654,7 +2082,7 @@ async function startRefresh() {
   $("refreshBtn").disabled = true;
   let r;
   try {
-    r = await fetch("api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    r = await fetch(API("api/export"), { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   } catch (e) { $("refreshBtn").disabled = false; toast("Could not reach the server."); return; }
   if (r.status === 501) { $("refreshBtn").hidden = true; toast("Exports aren't set up on this server."); return; }
   if (r.status !== 202 && r.status !== 409) { $("refreshBtn").disabled = false; toast("The server refused the export (" + r.status + ")."); return; }
@@ -1668,6 +2096,9 @@ function initRefresh() {
   pollRefresh();   // picks up a run that is already going
 }
 
+$("wrap").dataset.mode = MODE;
+if (MODE === "stats") document.title = "Backlog statistics";
+try { const m = localStorage.getItem("bt-metric"); if (STAT_METRICS.includes(m)) S.metric = m; } catch (e) {}
 setLibrary(sampleGames(), "sample", null);
 bootServer().then((isServer) => { if (!isServer) { bootDb(); bootSample(); } });
 })();

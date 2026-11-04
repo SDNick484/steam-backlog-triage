@@ -168,5 +168,154 @@ class Buckets(unittest.TestCase):
         self.assertFalse(node("isUnknown(DATA, 'ctrl')", {**g, "hasDetails": True}))
 
 
+# ---------------------------------------------------------------- statsFor, checked against the fixture
+SUFFIXES = {"inc", "llc", "ltd", "co", "corp", "corporation", "gmbh", "sa", "ab", "limited"}
+
+
+def pkey(name):
+    """A plain Python version of nameKey for the fixture's ASCII names."""
+    toks = re.sub(r"^\W+|\W+$", "", name.lower().strip()).split()
+    while len(toks) > 1 and re.sub(r"\W", "", toks[-1]) in SUFFIXES:
+        toks.pop()
+        toks[-1] = re.sub(r"^\W+|\W+$", "", toks[-1])
+    return " ".join(toks)
+
+
+def pstate(g):
+    return "never" if g["playtime"] == 0 else "tried" if g["playtime"] < 120 else "played"
+
+
+STATS_JS = "statsFor(DATA.map(normalizeGame).map(annotateNames), {dsrc: 'main', laneOf: () => ''})"
+
+
+class StatsFor(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.games = FIXTURE["games"]
+        cls.stats = node(STATS_JS, cls.games)
+
+    def rows(self, d):
+        return {r["key"]: r for r in self.stats["dims"][d]["rows"]}
+
+    def test_tiles_match_a_plain_count(self):
+        t, g = self.stats["tiles"], self.games
+        self.assertEqual(t["games"], 40)
+        self.assertEqual(t["minutes"], sum(x["playtime"] for x in g))
+        self.assertEqual(t["deckMinutes"], sum(x.get("deckPlaytime", 0) for x in g))
+        for st in ("never", "tried", "played"):
+            self.assertEqual(t[st], sum(1 for x in g if pstate(x) == st), st)
+        self.assertEqual(t["never"] + t["tried"] + t["played"], 40)
+        mcs = sorted(x["metacritic"] for x in g if x.get("metacritic"))
+        mid = len(mcs) // 2
+        self.assertEqual(t["mcCount"], len(mcs))
+        self.assertAlmostEqual(t["mcMedian"], mcs[mid] if len(mcs) % 2 else (mcs[mid - 1] + mcs[mid]) / 2)
+
+    def test_genre_publisher_and_developer_rows(self):
+        for d, field, key in (("gen", "genres", lambda x: x), ("pub", "publishers", pkey), ("dev", "developers", pkey)):
+            want, unknown = {}, 0
+            for g in self.games:
+                ks = {key(v) for v in g.get(field, []) if key(v)}
+                if not ks:
+                    unknown += 1
+                for k in ks:
+                    e = want.setdefault(k, {"n": 0, "minutes": 0, "never": 0})
+                    e["n"] += 1
+                    e["minutes"] += g["playtime"]
+                    e["never"] += pstate(g) == "never"
+            got = self.rows(d)
+            self.assertEqual(set(got), set(want), d)
+            for k, e in want.items():
+                self.assertEqual({x: got[k][x] for x in e}, e, f"{d} {k}")
+            dim = self.stats["dims"][d]
+            self.assertEqual(dim["unknown"]["n"] if dim["unknown"] else 0, unknown, d)
+            self.assertEqual(dim["known"] + unknown, 40, d)
+
+    def test_every_dimension_rows_plus_unknown_cover_the_games(self):
+        for d, dim in self.stats["dims"].items():
+            self.assertEqual(dim["total"], 40)
+            self.assertEqual(dim["known"] + (dim["unknown"]["n"] if dim["unknown"] else 0), 40, d)
+            if d not in ("gen", "pub", "dev"):   # the multi-value dimensions count a game under each value
+                self.assertEqual(sum(r["n"] for r in dim["rows"]), dim["known"], d)
+            for r in dim["rows"]:
+                self.assertEqual(r["never"] + r["tried"] + r["played"], r["n"], f"{d} {r['key']}")
+
+    def test_single_value_dimensions(self):
+        g = self.games
+        for k, r in self.rows("deck").items():
+            self.assertEqual(r["n"], sum(1 for x in g if x.get("deck") == int(k)), k)
+        for k, r in self.rows("pt").items():
+            self.assertEqual(r["n"], sum(1 for x in g if (x.get("proton") or {}).get("tier") == k), k)
+        for k, r in self.rows("year").items():
+            self.assertEqual(r["n"], sum(1 for x in g if x.get("year") == int(k)), k)
+
+    def test_pinned_literals(self):
+        # Worked out once from tests/fixtures/stats_library.json; a change here is a change in meaning.
+        t, dims = self.stats["tiles"], self.stats["dims"]
+        self.assertEqual({k: t[k] for k in ("minutes", "deckMinutes", "never", "tried", "played", "backlogGames",
+                                            "backlogWithTime", "backlogHours", "mcMedian", "mcCount", "rvMedian", "rvCount")},
+                         {"minutes": 9460, "deckMinutes": 1979, "never": 10, "tried": 17, "played": 13,
+                          "backlogGames": 27, "backlogWithTime": 12, "backlogHours": 391, "mcMedian": 69, "mcCount": 32,
+                          "rvMedian": 67, "rvCount": 26})
+        rows = lambda d: [(r["key"], r["n"]) for r in dims[d]["rows"]]
+        unk = lambda d: dims[d]["unknown"]["n"] if dims[d]["unknown"] else None
+        self.assertEqual((rows("deck"), unk("deck")), ([(3, 12), (2, 9), (1, 8)], 11))
+        self.assertEqual((rows("mc"), unk("mc")), ([("lt60", 7), ("60s", 11), ("70s", 7), ("80s", 3), ("90p", 4)], 8))
+        self.assertEqual((sum(n for _, n in rows("rv")), unk("rv")), (26, 14))
+        self.assertEqual((rows("len"), unk("len")), ([("short", 5), ("mid", 2), ("long", 4), ("epic", 5)], 24))
+        self.assertEqual(unk("pub"), 10)
+        self.assertEqual([(r["label"], r["n"]) for r in dims["pub"]["rows"][:2]], [("Devolver Digital", 12), ("Finji", 4)])
+
+    def test_lane_dimension_uses_the_lane_function(self):
+        js = "statsFor(DATA.map(normalizeGame).map(annotateNames), {laneOf: (g) => g.appid % 2 ? 'next' : ''})"
+        dims = node(js, self.games)["dims"]["lane"]
+        odd = sum(1 for g in self.games if g["appid"] % 2)
+        self.assertEqual(dims["rows"][0]["n"], odd)
+        self.assertEqual(dims["unknown"]["n"], 40 - odd)
+
+    def test_empty_library(self):
+        st = node("statsFor([], {})", None)
+        self.assertEqual(st["tiles"]["games"], 0)
+        self.assertIsNone(st["tiles"]["mcMedian"])
+        self.assertEqual(st["dims"]["gen"]["rows"], [])
+
+
+class RowHelpers(unittest.TestCase):
+    ROWS = [{"key": str(y), "label": str(y), "n": n, "minutes": 60 * n, "never": 1, "tried": 0, "played": n - 1}
+            for y, n in ((2009, 2), (2011, 3), (2019, 4), (2021, 5))]
+
+    def test_year_buckets_by_decade(self):
+        got = node("yearBuckets(DATA, 10)", [{**r, "key": int(r["key"])} for r in self.ROWS])
+        self.assertEqual([(r["label"], r["n"]) for r in got], [("2000s", 2), ("2010s", 7), ("2020s", 5)])
+        self.assertEqual(sum(r["never"] for r in got), 4)
+        same = node("yearBuckets(DATA, 1)", self.ROWS)
+        self.assertEqual(same, self.ROWS)
+
+    def test_rank_rows_by_metric(self):
+        rows = [{"key": "a", "label": "A", "n": 3, "minutes": 600, "never": 3, "tried": 0, "played": 0},
+                {"key": "b", "label": "B", "n": 5, "minutes": 60, "never": 1, "tried": 4, "played": 0},
+                {"key": "c", "label": "C", "n": 5, "minutes": 60, "never": 1, "tried": 4, "played": 0}]
+        order = lambda m: [r["key"] for r in node(f"rankRows(DATA, '{m}')", rows)]
+        self.assertEqual(order("games"), ["b", "c", "a"])     # ties go A to Z
+        self.assertEqual(order("hours"), ["a", "b", "c"])
+        self.assertEqual(order("never"), ["a", "b", "c"])     # 100% then 20%, 20%
+
+    def test_fold_rows(self):
+        rows = [{"key": str(i), "label": str(i), "n": 10 - i, "minutes": 1, "never": 1, "tried": 1, "played": 8 - i}
+                for i in range(6)]
+        out = node("foldRows(DATA, 4)", rows)
+        self.assertEqual(len(out["rows"]), 4)
+        self.assertEqual((out["other"]["values"], out["other"]["n"]), (2, 6 + 5))
+        self.assertIsNone(node("foldRows(DATA, 6)", rows)["other"])
+
+    def test_csv(self):
+        dim = {"unknown": {"n": 2, "minutes": 30, "never": 1, "tried": 1, "played": 0}}
+        rows = [{"key": "x", "label": 'Say "hi", ok', "n": 4, "minutes": 90, "never": 1, "tried": 1, "played": 2}]
+        csv = node("statsCsv(DATA.dim, DATA.rows)", {"dim": dim, "rows": rows})
+        self.assertEqual(csv.splitlines(), [
+            "value,games,hours_played,never_launched,tried,played_2h_plus,percent_never_launched",
+            '"Say ""hi"", ok",4,1.5,1,1,2,25',
+            "Unknown,2,0.5,1,1,0,50"])
+
+
 if __name__ == "__main__":
     unittest.main()
