@@ -2,12 +2,14 @@
 
 Standard library only. The page's normalize(), score(), playState() and mainH() are pulled out of
 the HTML the same way scripts/gen_score_vectors.mjs (in mcp-server-steam-backlog) does, run under
-node, and compared with the expected values. Skipped when node isn't installed.
+node, and compared with the expected values. Skipped when node isn't installed, unless REQUIRE_NODE=1
+(CI sets it), when a missing node is a failure so parity can never pass by being skipped.
 
     python3 -m unittest discover -s tests
 """
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -77,8 +79,11 @@ class ScoreVectors(unittest.TestCase):
         digest = hashlib.sha256(extracted().encode("utf-8")).hexdigest()
         self.assertEqual(digest, VECTORS["source"]["functionsSha256"])
 
-    @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_page_scores_match_the_vectors(self):
+        if not shutil.which("node"):
+            if os.environ.get("REQUIRE_NODE") == "1":
+                self.fail("REQUIRE_NODE=1 but node is not installed, so the score parity check cannot run")
+            self.skipTest("node is not installed")
         res = subprocess.run(
             ["node", "-e", RUNNER], input=json.dumps({"code": extracted(), "vectors": VECTORS["vectors"]}),
             capture_output=True, text=True, timeout=60)
