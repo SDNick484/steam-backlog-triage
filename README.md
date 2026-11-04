@@ -5,7 +5,8 @@ A self-hosted dashboard for working through a Steam backlog, with an eye on what
 An exporter pulls your Steam library and enriches every game with:
 - **Steam Deck compatibility**: Valve's Verified / Playable / Unsupported rating
 - **HowLongToBeat times**: main story and main + extras
-- **Store details** (optional): genres, Metacritic score, release year, controller support
+- **Store details** (optional): genres, Metacritic score, release year, controller support, publishers and developers
+- **Steam user reviews** (optional, with the store details): review count, percent positive and Steam's label ("Very Positive")
 - **ProtonDB**: the community compatibility tier (Native to Borked, or Pending) and how many reports it's based on
 
 The dashboard then shows:
@@ -13,7 +14,8 @@ The dashboard then shows:
 - **Couch picks:** the six best backlog candidates for the Deck, ranked by how little you've played them, Deck rating, length and Metacritic score.
 - **Triage lanes:** mark games *Next*, *Someday*, *Skip* or *Done*. The marks are saved on the server, so every device sees the same lists.
 - **Notes and order** (self-hosted only): add a note to any game, and reorder the *Up next* lane by dragging rows or with the *Move up* and *Move down* buttons. Both are saved on the server in `notes.json` and `order.json`.
-- **The full list:** search, plus a filter panel for genre (any or all), HowLongToBeat length (main, extras or completionist), ProtonDB tier, Metacritic minimum, release year, Deck status, controller support, play state, triage lane and notes. Each filter has an *include unknown* option for games with no data. Filters combine with AND, and the state is kept in the URL, so a filtered view can be bookmarked. Couch picks respect the filters.
+- **The full list:** search, plus a filter panel for genre (any or all), HowLongToBeat length (main, extras or completionist), ProtonDB tier, Metacritic minimum, release year, Deck status, controller support, play state, triage lane and notes. Each filter has an *include unknown* option for games with no data. Filters combine with AND, and the state is kept in the URL, so a filtered view can be bookmarked. Couch picks respect the filters. There are also filters for publisher and developer (spellings such as "Devolver Digital" and "DEVOLVER DIGITAL, Inc." are grouped), a Metacritic maximum, Steam user review levels, and *Only unknown* checkboxes that list the games with no data for a field.
+- **Statistics:** the *Stats* link in the header (or `/stats`) shows the same library as charts: games, time played and never-launched share by genre, publisher, developer, Deck rating, ProtonDB tier, controller support, length, triage lane, Metacritic, Steam reviews and release year. It uses the same view, search and filters as the list, and the filters stay in the URL when you move between the two. Switch between games, hours played and % never launched; each row's strip splits its games into never launched, tried (under 2 h) and played (2 h or more). Click any row, "Unknown" rows included, to open the list with exactly those games. A game with several genres, publishers or developers counts under each of them. *Copy as CSV* copies a card's table. An export made before publishers, developers or reviews were collected still works: those cards say how many games they know, and fill in after the next `--details` run.
 
 Everything is standard-library Python, plus the optional [`howlongtobeatpy`](https://pypi.org/project/howlongtobeatpy/) package for HowLongToBeat times. The page is a single HTML file with no build step.
 
@@ -47,6 +49,7 @@ python3 backlog_server.py --data ~/exports   # then open http://localhost:8484/
 
 The first export takes a while for a big library:
 - **Store details** (`--details`): Steam allows about 200 lookups per 5 minutes, so roughly 50 minutes per 1,800 games.
+- **Steam user reviews** (`--details`): one extra request per game to the store's review summary (about one per second, no key needed), so roughly 30 more minutes per 1,800 games on the first run. Results are cached for 30 days, so later runs only fetch games that are new or whose entry has expired. A failed request is not cached and is retried on the next run.
 - **ProtonDB**: about 0.3 s per game, cached for 7 days, so a first run for 1,800 games takes about 9 minutes.
 - **HowLongToBeat:** about half a second per game.
 
@@ -92,6 +95,10 @@ systemctl enable --now backlog-triage backlog-export.timer
 
 When the server can run exports, the dashboard header shows a **Refresh library** button. It starts the exporter on the server, shows its phase and progress while it runs, and loads the new library when it finishes. Your filters and triage marks stay as they are. If an export is already running (for example the weekly cron one), the button shows that and waits for it. It is hidden when the page isn't served by `backlog_server.py` or the server has no export command. Exports take as long as they take: a first run for a large library can be an hour or more, and later runs only fetch what's new or expired.
 
+## Header links
+
+When the page is served by `backlog_server.py` its header always shows **Backlog** and **Stats** links, followed by any extra links given with `--nav LABEL=URL` (for example `--nav "Deals=https://deals.example.com/"`). The Backlog and Stats links carry your current filters.
+
 ## Security
 
 The server has no login.
@@ -106,6 +113,7 @@ Every response carries `X-Backlog-Server: 1` and `X-Backlog-Api: 2`.
 | Method | Path | |
 |---|---|---|
 | GET | `/` | Dashboard |
+| GET | `/stats` (also `/stats/`) | The same page, showing its Statistics view |
 | GET / PUT | `/api/library` | The current export (PUT replaces it; used by the page's **Load export** button) |
 | GET / PUT | `/api/triage` | Triage marks; PUT `{"appid": 620, "lane": "next"}` (`""` clears) |
 | GET / PUT | `/api/notes` | Notes; PUT `{"appid": 620, "note": "..."}` (`""` clears; up to 2,000 characters) |
@@ -140,10 +148,10 @@ The product needs only the Python standard library. The tests use `unittest`, an
 ```sh
 # Server routes, export endpoints, exporter (against a mock Steam), run-export.sh, privacy scanner, score parity
 python3 -m unittest -v tests.test_server tests.test_export_endpoints tests.test_exporter \
-  tests.test_run_export tests.test_privacy_scan tests.test_score_vectors
+  tests.test_run_export tests.test_privacy_scan tests.test_score_vectors tests.test_stats
 
 # The page in a real browser (pip install -r tests/browser/requirements.txt && playwright install chromium)
-python3 -m unittest -v tests.browser.test_page
+python3 -m unittest -v tests.browser.test_page tests.browser.test_filters tests.browser.test_stats_page
 
 # The Alpine installer, stubbed (changes /etc and /opt: run it in a container)
 docker run --rm -v "$PWD":/src:ro python:3.12-alpine sh /src/tests/installer/check.sh
