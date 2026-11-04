@@ -28,6 +28,7 @@ Everything is standard-library Python, plus the optional [`howlongtobeatpy`](htt
 | `run-export.sh` | Wrapper for cron/systemd and the dashboard's **Refresh library** button; reads your keys from `~/.steam-env` and takes the export lock |
 | `install/alpine.sh` | Installer for Alpine Linux (OpenRC); works well in a small Proxmox LXC |
 | `contrib/systemd/` | Service and timer units for systemd hosts |
+| `tests/`, `.github/` | Tests and CI (see [Tests and CI](#tests-and-ci)) |
 
 ## What you need
 
@@ -131,6 +132,52 @@ Notes and the Up next order are only saved by the self-hosted server. The artifa
 - HowLongToBeat, through `howlongtobeatpy`, which uses an unofficial API that can change. If it breaks, exports still complete without length times.
 
 This project isn't affiliated with Valve, HowLongToBeat or any store.
+
+## Tests and CI
+
+The product needs only the Python standard library. The tests use `unittest`, and CI adds test-only tools (node, Playwright, shellcheck) that are never installed on a server.
+
+```sh
+# Server routes, export endpoints, exporter (against a mock Steam), run-export.sh, privacy scanner, score parity
+python3 -m unittest -v tests.test_server tests.test_export_endpoints tests.test_exporter \
+  tests.test_run_export tests.test_privacy_scan tests.test_score_vectors
+
+# The page in a real browser (pip install -r tests/browser/requirements.txt && playwright install chromium)
+python3 -m unittest -v tests.browser.test_page
+
+# The Alpine installer, stubbed (changes /etc and /opt: run it in a container)
+docker run --rm -v "$PWD":/src:ro python:3.12-alpine sh /src/tests/installer/check.sh
+
+# shellcheck, py_compile, systemd-analyze verify
+sh .github/scripts/lint.sh
+```
+
+What each part checks:
+
+- **Server tests** cover every route in the API table above, using [`docs/backlog-api-contract.md`](https://github.com/SDNick484/mcp-server-steam-backlog/blob/main/docs/backlog-api-contract.md) in the MCP server's repository as the expected behavior (the contract text is quoted in each test's docstring).
+- **Export endpoint tests** use stub scripts for `--export-cmd`: 202, 409 while running (including a lock held by another process), exit codes, timeouts, and redaction of a fake key, an IPv4 address and a SteamID in the status lines.
+- **Exporter tests** run the real exporter against a local mock of the Steam API, the store and ProtonDB (`STEAM_API_BASE`, `STEAM_STORE_BASE`, `PROTONDB_BASE`), with `--limit`, without `howlongtobeatpy`, cache reuse, ProtonDB garbage, and a 429 followed by success. Sleeps are replaced by a recorder, so the suite never waits.
+- **Score parity** runs the page's `score()` under node against `tests/score_vectors.json`. In CI a missing node is a failure, not a skip.
+- **Page test** loads `backlog.html` in Chromium with no console errors, checks that lanes, the Up next order and notes persist across a second load, and that **Refresh library** runs a stub export and reloads.
+- **Installer test** runs `install/alpine.sh` in `python:3.12-alpine` twice (and a third time with one option changed): `~/.steam-env` and the saved options are kept, there is exactly one `BEGIN`/`END` cron block, and unrelated cron lines survive.
+- **MCP contract tests**: CI checks out [`mcp-server-steam-backlog`](https://github.com/SDNick484/mcp-server-steam-backlog) at a pinned commit and runs its `tests/test_contract.py` against this checkout's server (`BACKLOG_CHECKOUT`, `BACKLOG_REQUIRE_REAL=1`). A weekly run does the same against that repo's `main`. Bump `MCP_PINNED_REF` in `.github/workflows/ci.yml` when the contract changes.
+
+CI runs on pushes to `main`, pull requests, weekly, and on demand. The unit tests run on Python 3.11 to 3.14; the other jobs use one version. Every third-party action is pinned to a full commit SHA with its version in a comment, and Dependabot updates them weekly.
+
+### Privacy scan
+
+This repository is public, so a CI job (`.github/scripts/privacy_scan.py`) fails if a tracked file or a commit contains a SteamID, an IPv4 address that isn't loopback, documentation (RFC 5737) or private (RFC 1918), an email that isn't a `noreply` or `example` address, or any term from a private denylist. CI logs are public too, so the scanner prints only the file, line and rule, never the matched text. Files under `tests/fixtures/` may contain IP addresses, but never SteamIDs.
+
+The denylist holds things no pattern can know (your hostnames, domain, name, time zone, device names). It lives in a repository secret, so it is never committed. To add it:
+
+1. On GitHub, open this repository and choose **Settings**.
+2. In the left sidebar, choose **Secrets and variables**, then **Actions**.
+3. Under **Repository secrets**, choose **New repository secret**.
+4. Name it exactly `PRIVACY_DENYLIST`.
+5. In **Secret**, enter one term per line. Matching ignores case and looks at file contents, file names and commit messages. Lines starting with `#` are ignored.
+6. Choose **Add secret**.
+
+Until it exists, the job runs the pattern checks only and shows a warning. Pull requests from forks, and Dependabot's, can't read the secret and get the same warning. To check locally: `PRIVACY_DENYLIST="$(cat my-terms.txt)" python3 .github/scripts/privacy_scan.py`. A line can opt out with the text `privacy-scan: allow` (say why beside it).
 
 ## License
 
