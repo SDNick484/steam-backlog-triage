@@ -1,0 +1,340 @@
+"""steam_backlog_export.py against a local mock of the Steam Web API, the Steam store and ProtonDB.
+
+The three base URLs are overridable with STEAM_API_BASE, STEAM_STORE_BASE and PROTONDB_BASE (the script's own
+test seam), so no test touches the network. time.sleep is replaced (tests/exporter_shim.py) so back-off doesn't
+slow the suite, and every requested sleep is recorded so the tests can still check it. howlongtobeatpy is hidden
+via PYTHONPATH, so no test reaches the real, unofficial HowLongToBeat service.
+
+Expected library shape: schema 2 as described in section 3 of docs/backlog-api-contract.md (in SDNick484/mcp-server-steam-backlog) (the file the server
+serves at GET /api/library).
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _support import MockSteam, fake_steamid, run_exporter  # noqa: E402
+
+GAME_KEYS = {"appid", "name", "playtime", "deckPlaytime", "lastPlayed", "deck", "hltb", "genres", "metacritic",
+             "year", "controller", "proton"}
+FAKE_KEY = "FAKEKEY0123456789"
+
+
+class ExporterCase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.mock = MockSteam()
+        self.mock.__enter__()
+        self.addCleanup(self.mock.__exit__, None, None, None)
+        self.n = 0
+
+    def run_ex(self, *args, mock=None, key=FAKE_KEY, steamid=True, env=None):
+        """Run the exporter in self.dir. Returns (proc, sleeps)."""
+        self.n += 1
+        log = self.dir / f"sleeps{self.n}.json"
+        argv = list(args)
+        if steamid:
+            argv += ["--steamid", fake_steamid()]
+        if key:
+            argv += ["--key", key]
+        p = run_exporter(self.dir, argv, self.mock if mock is None else mock, sleep_log=log, extra_env=env)
+        sleeps = json.loads(log.read_text()) if log.exists() else []
+        return p, sleeps
+
+    def library(self, name="steam_backlog.json"):
+        return json.loads((self.dir / name).read_text())
+
+    def ok(self, *args, **kw):
+        p, sleeps = self.run_ex(*args, **kw)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return p, sleeps
+
+
+class OutputShape(ExporterCase):
+    def test_top_level_fields(self):
+        """Contract section 3: schema 2; source; exportedAt ISO 8601 UTC; steamid; persona; games."""
+        p, _ = self.ok()
+        lib = self.library()
+        self.assertEqual(set(lib), {"schema", "source", "exportedAt", "steamid", "persona", "games"})
+        self.assertEqual(lib["schema"], 2)
+        self.assertEqual(lib["source"], "steam_backlog_export.py")
+        self.assertRegex(lib["exportedAt"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$")
+        self.assertEqual(lib["steamid"], fake_steamid())
+        self.assertEqual(lib["persona"], "Test Persona")
+
+    def test_game_records_have_exactly_the_documented_fields_and_types(self):
+        """Contract section 3, per-game fields."""
+        self.ok()
+        games = self.library()["games"]
+        self.assertEqual(len(games), 4)
+        for g in games:
+            with self.subTest(g["name"]):
+                self.assertEqual(set(g), GAME_KEYS)
+                self.assertIsInstance(g["appid"], int)
+                for k in ("playtime", "deckPlaytime", "lastPlayed", "deck"):
+                    self.assertIsInstance(g[k], int, k)
+                self.assertIn(g["deck"], (0, 1, 2, 3))
+                self.assertIsInstance(g["genres"], list)
+                self.assertIsNone(g["hltb"])
+                self.assertEqual(g["proton"], {"tier": "gold", "total": 120})
+
+    def test_games_are_sorted_by_name_ignoring_case(self):
+        """backlog export sorts owned games by lower-cased name ('test game alpha' sorts before 'Test Game Bravo')."""
+        self.ok()
+        self.assertEqual([g["name"] for g in self.library()["games"]],
+                         ["test game alpha", "Test Game Bravo", "Test Game Charlie", "Test Game Delta"])
+
+    def test_playtime_fields_are_mapped_and_defaulted(self):
+        """playtime_forever -> playtime, playtime_deck_forever -> deckPlaytime, rtime_last_played -> lastPlayed;
+        missing values become 0."""
+        self.ok()
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual((by[2003]["playtime"], by[2003]["deckPlaytime"], by[2003]["lastPlayed"]), (600, 120, 1710000000))
+        self.assertEqual((by[2001]["playtime"], by[2001]["deckPlaytime"], by[2001]["lastPlayed"]), (0, 0, 0))
+
+    def test_logs_go_to_stderr_and_stdout_stays_empty(self):
+        """The server merges both streams, but the script's contract is: progress on stderr."""
+        p, _ = self.ok()
+        self.assertEqual(p.stdout, "")
+        self.assertIn("Test Persona: 4 games", p.stderr)
+        self.assertRegex(p.stderr, r"Wrote steam_backlog\.json: 4 games, 1 never launched, 0 with HLTB times\.")
+
+    def test_the_key_is_never_printed(self):
+        """Secrets must not reach the log (the log is shown in the dashboard after redaction, but is not trusted)."""
+        p, _ = self.ok()
+        self.assertNotIn(FAKE_KEY, p.stderr + p.stdout)
+
+    def test_the_library_is_written_through_a_temp_file(self):
+        """The server hashes the library for its ETag, so it must never see a half-written file: write beside it
+        and rename over it. No .tmp file may be left behind."""
+        self.ok()
+        self.assertEqual(sorted(x.name for x in self.dir.glob("*.tmp")), [])
+        self.assertTrue((self.dir / "steam_backlog_cache.json").exists())
+
+
+class Limit(ExporterCase):
+    def test_limit_processes_only_the_first_n_games_by_name(self):
+        """--limit N: only the first N games (after sorting) are looked up and written."""
+        self.ok("--limit", "2")
+        self.assertEqual([g["name"] for g in self.library()["games"]], ["test game alpha", "Test Game Bravo"])
+        self.assertEqual(self.mock.count("deck:"), 2)
+        self.assertEqual(self.mock.count("proton:"), 2)
+        self.assertEqual(set(self.mock.hits) - {"owned", "persona"}, {"deck:2001", "deck:2002", "proton:2001", "proton:2002"})
+
+
+class NoHowLongToBeat(ExporterCase):
+    def test_runs_without_the_package_and_leaves_hltb_empty(self):
+        """howlongtobeatpy is the one optional dependency: without it the export still succeeds, says so, and
+        every game's hltb is null."""
+        p, _ = self.ok()
+        self.assertIn("HowLongToBeat: skipped (pip install howlongtobeatpy to enable).", p.stderr)
+        self.assertTrue(all(g["hltb"] is None for g in self.library()["games"]))
+
+    def test_skip_hltb_flag_does_not_even_try_the_import(self):
+        """--skip-hltb: no HowLongToBeat message at all."""
+        p, _ = self.ok("--skip-hltb")
+        self.assertNotIn("HowLongToBeat", p.stderr)
+
+
+class Cache(ExporterCase):
+    def test_second_run_reuses_the_cache(self):
+        """Everything looked up is cached (steam_backlog_cache.json), so a second run asks Steam and ProtonDB
+        only for the library and the persona, and writes the same games."""
+        self.ok()
+        first = self.library()
+        self.assertEqual(self.mock.count("deck:"), 4)
+        self.assertEqual(self.mock.count("proton:"), 4)
+        p, _ = self.ok()
+        self.assertEqual(self.mock.count("deck:"), 4, "no new deck requests")
+        self.assertEqual(self.mock.count("proton:"), 4, "no new ProtonDB requests")
+        self.assertEqual(self.mock.hits["owned"], 2)
+        self.assertIn("Steam Deck compatibility: everything cached.", p.stderr)
+        self.assertIn("ProtonDB: everything cached.", p.stderr)
+        second = self.library()
+        first.pop("exportedAt"), second.pop("exportedAt")
+        self.assertEqual(first, second)
+
+    def test_refresh_ignores_the_cache(self):
+        """--refresh: fetch everything again."""
+        self.ok()
+        self.ok("--refresh")
+        self.assertEqual(self.mock.count("deck:"), 8)
+        self.assertEqual(self.mock.count("proton:"), 8)
+
+    def test_new_games_are_the_only_ones_fetched_later(self):
+        """A game added after the first run is fetched; the rest come from the cache."""
+        self.ok()
+        self.mock.games = self.mock.games + [{"appid": 2005, "name": "Test Game Echo", "playtime_forever": 1}]
+        self.ok()
+        self.assertEqual(self.mock.hits["deck:2005"], 1)
+        self.assertEqual(self.mock.hits["deck:2001"], 1)
+        self.assertEqual(len(self.library()["games"]), 5)
+
+    def test_cache_file_has_all_four_kinds(self):
+        """The cache holds deck, hltb, details and proton sections (CACHE_KINDS)."""
+        self.ok()
+        cache = json.loads((self.dir / "steam_backlog_cache.json").read_text())
+        self.assertEqual(set(cache), {"deck", "hltb", "details", "proton"})
+        self.assertEqual(set(cache["deck"]), {"2001", "2002", "2003", "2004"})
+        self.assertEqual(set(cache["deck"]["2001"]), {"t", "v"})
+
+    def test_corrupt_cache_is_ignored(self):
+        """An unreadable cache file is reported and replaced, not fatal."""
+        (self.dir / "steam_backlog_cache.json").write_text("{not json")
+        p, _ = self.ok()
+        self.assertIn("unreadable; starting fresh", p.stderr)
+        self.assertEqual(self.mock.count("deck:"), 4)
+
+
+class StoreRateLimiting(ExporterCase):
+    def test_a_429_with_retry_after_is_waited_out_then_succeeds(self):
+        """The store answers 429 once: the exporter waits Retry-After seconds, retries, and uses the good answer."""
+        self.mock.deck[2002] = [(429, b"", {"Retry-After": "7"}), (200, {"success": 1, "results": {"resolved_category": 2}})]
+        p, sleeps = self.ok()
+        self.assertIn("HTTP 429 from", p.stderr)
+        self.assertIn([7.0, "http_json"], sleeps)
+        self.assertEqual(self.mock.hits["deck:2002"], 2)
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["deck"], 2)
+
+    def test_a_429_without_retry_after_backs_off_exponentially(self):
+        """No Retry-After: wait 5 s, then 10 s, ... (delay doubles, capped at 120)."""
+        self.mock.deck[2002] = [(429, b"", {}), (429, b"", {}), (200, {"success": 1, "results": {"resolved_category": 1}})]
+        _, sleeps = self.ok()
+        waits = [s for s, who in sleeps if who == "http_json"]
+        self.assertEqual(waits, [5.0, 10.0])
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["deck"], 1)
+
+    def test_a_server_error_is_retried_too(self):
+        """5xx is treated like 429."""
+        self.mock.deck[2002] = [(503, b"", {}), (200, {"success": 1, "results": {"resolved_category": 3}})]
+        _, sleeps = self.ok()
+        self.assertEqual([s for s, who in sleeps if who == "http_json"], [5.0])
+
+    def test_a_404_is_not_retried_and_not_cached(self):
+        """Other 4xx: the answer is None ('network trouble'): the game exports as deck 0 and is retried next run."""
+        self.mock.deck[2002] = [(404, b"{}", {})]
+        _, sleeps = self.ok()
+        self.assertEqual(self.mock.hits["deck:2002"], 1)
+        self.assertEqual([s for s, who in sleeps if who == "http_json"], [])
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["deck"], 0)
+        self.ok()
+        self.assertEqual(self.mock.hits["deck:2002"], 2, "not cached, so fetched again")
+        self.assertEqual(self.mock.hits["deck:2001"], 1, "the others were cached")
+
+    def test_an_unknown_deck_category_is_stored_as_unknown(self):
+        """A resolved_category outside 0-3 becomes 0 (Unknown)."""
+        self.mock.deck[2002] = [(200, {"success": 1, "results": {"resolved_category": 99}})]
+        self.ok()
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["deck"], 0)
+
+
+class ProtonDbGarbage(ExporterCase):
+    def test_non_json_is_retried_then_skipped_without_failing_the_export(self):
+        """ProtonDB is unofficial: an HTML error page behind a 200 is retried (5, 10, 20, 40 s), then given up
+        on. The export still succeeds, that game's proton is null, and it is not cached (retried next run)."""
+        self.mock.proton[2002] = [(200, b"<html>maintenance</html>", {})]
+        p, sleeps = self.ok()
+        self.assertIn("giving up on", p.stderr)
+        self.assertEqual([s for s, who in sleeps if who == "http_json"], [5.0, 10.0, 20.0, 40.0])
+        self.assertEqual(self.mock.hits["proton:2002"], 5)
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertIsNone(by[2002]["proton"])
+        self.assertEqual(by[2001]["proton"], {"tier": "gold", "total": 120})
+        self.ok()
+        self.assertEqual(self.mock.hits["proton:2002"], 10)
+        self.assertEqual(self.mock.hits["proton:2001"], 1)
+
+    def test_valid_json_of_the_wrong_shape_is_tolerated(self):
+        """'Missing or unexpected fields come back as tier None rather than failing the export.'"""
+        self.mock.proton[2001] = [(200, [1, 2, 3], {})]
+        self.mock.proton[2002] = [(200, {"tier": "ultra-mega", "total": -5}, {})]
+        self.mock.proton[2003] = [(200, {"tier": 7, "total": "many"}, {})]
+        self.mock.proton[2004] = [(200, {}, {})]
+        self.ok()
+        got = {g["appid"]: g["proton"] for g in self.library()["games"]}
+        for appid in (2001, 2002, 2003, 2004):
+            self.assertEqual(got[appid], {"tier": None, "total": 0}, appid)
+
+    def test_a_known_tier_passes_through(self):
+        """Tiers on the allow-list are kept with their report count."""
+        self.mock.proton[2001] = [(200, {"tier": "platinum", "total": 4321}, {})]
+        self.ok()
+        got = {g["appid"]: g["proton"] for g in self.library()["games"]}
+        self.assertEqual(got[2001], {"tier": "platinum", "total": 4321})
+
+
+class StoreDetails(ExporterCase):
+    def test_details_are_off_by_default(self):
+        """Store details take ~1.6 s a game, so they are opt-in (--details)."""
+        self.ok()
+        self.assertEqual(self.mock.count("details:"), 0)
+        self.assertTrue(all(g["genres"] == [] and g["year"] is None for g in self.library()["games"]))
+
+    def test_details_fill_genres_metacritic_year_and_controller(self):
+        """--details: genres, metacritic score, release year and controller support from appdetails."""
+        self.mock.details[2002] = [(200, {"2002": {"success": True, "data": {
+            "genres": [{"description": "RPG"}], "metacritic": {"score": 91},
+            "release_date": {"date": "Mar 3, 2019"}, "categories": [{"id": 18}]}}}, {})]
+        self.mock.details[2003] = [(200, {"2003": {"success": False}}, {})]
+        p, _ = self.ok("--details")
+        self.assertRegex(p.stderr, r"Store details: fetching 4 games")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual((by[2002]["genres"], by[2002]["metacritic"], by[2002]["year"], by[2002]["controller"]),
+                         (["RPG"], 91, 2019, "partial"))
+        self.assertEqual((by[2003]["genres"], by[2003]["metacritic"], by[2003]["year"], by[2003]["controller"]),
+                         ([], None, None, None))
+        self.assertEqual((by[2001]["genres"], by[2001]["year"], by[2001]["controller"]),
+                         (["Action", "Indie"], 2020, "full"))
+
+
+class BadInput(ExporterCase):
+    def test_no_key_is_a_clear_error_before_any_request(self):
+        """STEAM_API_KEY or --key is required."""
+        p, _ = self.run_ex(key=None)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("Set STEAM_API_KEY", p.stderr)
+        self.assertEqual(self.mock.hits, {})
+        self.assertFalse((self.dir / "steam_backlog.json").exists())
+
+    def test_key_from_the_environment(self):
+        """$STEAM_API_KEY is the default for --key (how run-export.sh passes it)."""
+        p, _ = self.run_ex(key=None, env={"STEAM_API_KEY": FAKE_KEY})
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+    def test_bad_steamid_is_rejected(self):
+        """--steamid must be 17 digits."""
+        p, _ = self.run_ex(steamid=False, key=FAKE_KEY)
+        self.assertNotEqual(p.returncode, 0)
+        p, _ = self.run_ex("--steamid", "123", steamid=False)
+        self.assertIn("17-digit", p.stderr)
+
+    def test_a_profile_url_with_a_numeric_id_needs_no_lookup(self):
+        """--profile .../profiles/<17 digits> is read directly."""
+        p, _ = self.run_ex("--profile", f"https://steamcommunity.com/profiles/{fake_steamid()}/", steamid=False)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.library()["steamid"], fake_steamid())
+
+    def test_persona_missing_falls_back_to_the_steamid_in_the_log_and_null_in_the_file(self):
+        """No persona name: the log line uses the SteamID, the library says persona null."""
+        mock = MockSteam(persona=None)
+        mock.__enter__()
+        self.addCleanup(mock.__exit__, None, None, None)
+        p, _ = self.ok(mock=mock)
+        self.assertIsNone(self.library()["persona"])
+        self.assertIn(f"{fake_steamid()}: 4 games", p.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
