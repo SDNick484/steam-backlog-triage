@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "source": "steam_backlog_export.py",
+  "exportedAt": "2026-01-01T00:00:00+00:00",
+  "steamid": "7656119XXXXXXXXXX",
+  "persona": "Test Persona",
+  "games": [
+    {"appid": 1001, "name": "Test Game Alpha", "playtime": 0, "deckPlaytime": 0, "lastPlayed": 0, "deck": 3,
+     "hltb": {"main": 4.5, "extra": 6.0, "complete": 9.0}, "genres": ["Action"], "metacritic": 85, "year": 2020,
+     "controller": "full", "proton": {"tier": "gold", "total": 120}},
+    {"appid": 1002, "name": "Test Game Bravo", "playtime": 45, "deckPlaytime": 0, "lastPlayed": 1700000000, "deck": 2,
+     "hltb": {"main": 12.0, "extra": 18.0, "complete": 25.0}, "genres": ["RPG"], "metacritic": 78, "year": 2018,
+     "controller": "partial", "proton": {"tier": "silver", "total": 40}},
+    {"appid": 1003, "name": "Test Game Charlie", "playtime": 600, "deckPlaytime": 120, "lastPlayed": 1710000000, "deck": 3,
+     "hltb": {"main": 20.0, "extra": 30.0, "complete": 45.0}, "genres": ["Strategy"], "metacritic": 80, "year": 2016,
+     "controller": null, "proton": {"tier": "platinum", "total": 300}},
+    {"appid": 1004, "name": "Test Game Delta", "playtime": 0, "deckPlaytime": 0, "lastPlayed": 0, "deck": 1,
+     "hltb": null, "genres": [], "metacritic": null, "year": null, "controller": null, "proton": null},
+    {"appid": 1005, "name": "Test Game Echo", "playtime": 0, "deckPlaytime": 0, "lastPlayed": 0, "deck": 0,
+     "hltb": {"main": null, "extra": null, "complete": null}, "genres": ["Puzzle"], "metacritic": null, "year": 2022,
+     "controller": null, "proton": {"tier": "native", "total": 50}},
+    {"appid": 1006, "name": "Test Game Foxtrot", "playtime": 0, "deckPlaytime": 30, "lastPlayed": 1720000000, "deck": 2,
+     "hltb": {"main": 30.0, "extra": 40.0, "complete": 60.0}, "genres": ["Adventure", "Indie"], "metacritic": 90, "year": 2021,
+     "controller": "full", "proton": {"tier": "gold", "total": 75}}
+  ]
+}
