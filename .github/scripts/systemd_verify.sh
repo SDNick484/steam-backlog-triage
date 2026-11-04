@@ -15,6 +15,7 @@ SUDO=""
 [ "$(id -u)" = 0 ] || SUDO="sudo"
 
 made=""
+# shellcheck disable=SC2329  # runs from the EXIT trap
 cleanup() {
   for f in $made; do $SUDO rm -f "$f"; done
   rm -rf "${WORK:-}"
@@ -31,10 +32,12 @@ stub() { # stub PATH: an executable that does nothing, created only if it isn't 
   fi
 }
 
-# Every absolute program named by an ExecStart= line.
-for p in $(sed -n 's/^ExecStart=\(\/[^ ]*\).*/\1/p' "$UNITS"/*.service | sort -u); do stub "$p"; done
-# ...and the script arguments the units pass (paths under /opt).
-for p in $(sed -n 's/^ExecStart=.* \(\/opt\/[^ ]*\).*/\1/p' "$UNITS"/*.service | sort -u); do stub "$p"; done
+# Every absolute program named by an ExecStart= line, and the /opt script arguments the units pass.
+{
+  sed -n 's/^ExecStart=\(\/[^ ]*\).*/\1/p' "$UNITS"/*.service
+  sed -n 's/^ExecStart=.* \(\/opt\/[^ ]*\).*/\1/p' "$UNITS"/*.service
+} | sort -u > "$WORK/paths"
+while read -r p; do stub "$p"; done < "$WORK/paths"
 
 # Verify copies, so nothing depends on where the checkout is.
 cp "$UNITS"/* "$WORK"/
@@ -45,5 +48,5 @@ if [ -n "$out" ]; then
   echo "$out" >&2
   status=1
 fi
-[ "$status" = 0 ] && echo "systemd units verified: $(ls "$UNITS" | tr '\n' ' ')"
+[ "$status" = 0 ] && echo "systemd units verified: $(cd "$UNITS" && echo *)"
 exit "$status"
