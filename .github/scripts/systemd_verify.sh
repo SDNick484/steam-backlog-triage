@@ -43,6 +43,10 @@ while read -r p; do stub "$p"; done < "$WORK/paths"
 cp "$UNITS"/* "$WORK"/
 status=0
 out=$(cd "$WORK" && systemd-analyze verify ./*.service ./*.timer 2>&1) || status=$?
+# verify also loads the units ours depend on and reports warnings about the host's own packaged units (CI runners
+# have a few). Those are not ours: drop lines about files under the system unit directories.
+out=$(printf '%s\n' "$out" | grep -Ev '^(/usr/lib|/lib|/etc|/run)/systemd/' || true)
+out=$(printf '%s' "$out" | sed '/^$/d')
 if [ -n "$out" ]; then
   echo "systemd-analyze verify printed:" >&2
   echo "$out" >&2
