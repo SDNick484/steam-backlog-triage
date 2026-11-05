@@ -60,6 +60,7 @@ TTL_HLTB = 90
 TTL_DETAILS = 90
 TTL_PROTON = 7
 TTL_REVIEWS = 30
+REVIEWS_INTERVAL = 3.0  # seconds between review requests: the store rate-limits this endpoint hard
 REVIEWS_MAX_FAILURES = 5  # failures in a row before the reviews step gives up for this run
 
 # Every cache kind the exporter keeps. Loading ignores kinds not listed here.
@@ -281,7 +282,7 @@ def fetch_details(appid: int, limiter: RateLimiter) -> dict | None:
     }
 
 
-def fetch_reviews(appid: int, limiter: RateLimiter, retries: int = 2) -> dict | None:
+def fetch_reviews(appid: int, limiter: RateLimiter, retries: int = 0) -> dict | None:
     """Steam user-review summary. Returns {'total','positive','desc'}; None on network trouble.
 
     Uses the store's appreviews endpoint with num_per_page=0, so only the summary comes back (no key needed).
@@ -488,7 +489,7 @@ def main() -> None:
             run_parallel("Store details", todo, do_details, workers=2)
 
             # Steam user reviews: a separate, lighter endpoint, but still be polite. Cached for TTL_REVIEWS days.
-            reviews_limiter = RateLimiter(1.0)
+            reviews_limiter = RateLimiter(REVIEWS_INTERVAL)
 
             # If Steam starts answering these requests with errors or pages that aren't JSON (it rate-limits the
             # store), stop after a few failures in a row. Games already fetched are cached, failed ones are not,
@@ -509,7 +510,7 @@ def main() -> None:
 
             todo = [a for a in appids if cache.get("reviews", a, TTL_REVIEWS) is None]
             if todo:
-                log(f"  (about {len(todo) / 60:.0f} minutes for store reviews)")
+                log(f"  (about {len(todo) * REVIEWS_INTERVAL / 60:.0f} minutes for store reviews)")
             run_parallel("Store reviews", todo, do_reviews, workers=2)
             if streak.stopped:
                 log(f"Store reviews: {fetched['n']} of {len(todo)} fetched this run.")
