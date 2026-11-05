@@ -387,8 +387,8 @@ class StoreDetails(ExporterCase):
         self.assertIn("next run", p.stderr)
         asked = mock.count("reviews:")
         limit = exporter.REVIEWS_MAX_FAILURES
-        # Each failing game costs 3 requests (the first try and 2 retries); two workers can overshoot by one game.
-        self.assertLessEqual(asked, 3 * (limit + 1), "it kept asking after the limit")
+        # A failing game is asked once, with no retries (retrying while throttled makes it worse); two workers can overshoot by one.
+        self.assertLessEqual(asked, limit + 1, "it kept asking after the limit")
         self.assertEqual(len(self.library()["games"]), 30, "the library is still written")
         self.assertTrue(all(g["reviews"] is None for g in self.library()["games"]))
         # Steam recovers: the next run fetches every game it has not got.
@@ -523,9 +523,10 @@ class FetchReviews(unittest.TestCase):
         r, _ = self.fetch(None)
         self.assertIsNone(r)
 
-    def test_retries_are_kept_short_so_a_throttled_game_does_not_stall_the_run(self):
+    def test_a_failed_request_is_not_retried_and_requests_are_spaced(self):
         _, m = self.fetch(review_payload(1, 1, "x"))
-        self.assertEqual(m.call_args.kwargs.get("retries"), 2)
+        self.assertEqual(m.call_args.kwargs.get("retries"), 0)
+        self.assertGreaterEqual(exporter.REVIEWS_INTERVAL, 3.0)
 
     def test_review_record(self):
         rec = exporter.review_record
