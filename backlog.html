@@ -54,7 +54,14 @@ nav.pages a:hover{color:var(--accent-ink)}
 
 /* Header */
 .top{display:flex;flex-wrap:wrap;gap:16px 24px;align-items:flex-end;justify-content:space-between}
-.title-block{display:flex;flex-direction:column;gap:8px;max-width:62ch}
+.title-block{display:flex;flex-direction:column;gap:8px;max-width:62ch;min-width:0}
+.title-row{display:flex;align-items:center;gap:8px 14px;min-width:0}
+.title-row h1{min-width:0}
+#chatSlot{flex:none}
+#chatSlot:empty{display:none}
+#chatTop{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;text-decoration:none;font-size:13.5px;font-weight:600;color:var(--ink);background:var(--surface);white-space:nowrap}
+#chatTop:hover,#chatTop[aria-current="page"]{background:var(--surface-2);border-color:var(--surface-2)}
+#chatTop:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:999px}
 .headline{font-size:16.5px;color:var(--ink-2)}
 .headline b{color:var(--ink);font-weight:600}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -228,6 +235,9 @@ input::placeholder{color:var(--muted)}
 /* Statistics view */
 .wrap[data-mode="stats"] .only-list{display:none!important}
 .wrap:not([data-mode="stats"]) .only-stats{display:none!important}
+/* Ask view: only the header and the thread */
+.wrap[data-mode="ask"] .overview,.wrap[data-mode="ask"] #picksSec,.wrap[data-mode="ask"] #howto,.wrap[data-mode="ask"] #allSec{display:none!important}
+.wrap:not([data-mode="ask"]) .only-ask{display:none!important}
 .only-stats{display:flex;flex-direction:column;gap:14px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px}
 .tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -274,6 +284,24 @@ input::placeholder{color:var(--muted)}
 .yhist .ybar:focus{outline:none}
 .yhist .ybar:focus-visible rect.hit{stroke:var(--accent);stroke-width:1.5}
 
+/* Ask thread */
+.only-ask{display:flex;flex-direction:column;gap:14px}
+.chat-thread{display:flex;flex-direction:column;gap:14px}
+.chat-hint{font-size:14px;color:var(--muted);max-width:70ch}
+.chat-q{align-self:flex-end;max-width:min(85%,60ch);background:var(--accent-soft);color:var(--ink);padding:8px 12px;border-radius:12px 12px 4px 12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.chat-turn{display:flex;flex-direction:column;gap:10px;min-width:0}
+.chat-a{color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;max-width:80ch}
+.chat-rows>:first-child{border-top:0}
+.chat-missing{padding:11px 16px;border-top:1px solid var(--line);color:var(--ink-2);overflow-wrap:anywhere}
+.chat-status{font-size:13.5px;color:var(--ink-2)}
+.chat-error{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;border:1px solid var(--crit);border-radius:10px;background:var(--surface);padding:10px 14px;font-size:14px;color:var(--crit-ink)}
+.chat-form{position:sticky;bottom:0;z-index:5;display:flex;flex-direction:column;gap:6px;background:var(--bg);border-top:1px solid var(--line);padding:10px 0 calc(10px + env(safe-area-inset-bottom,0px))}
+.chat-form[hidden]{display:none}
+.chat-input{display:flex;gap:8px;min-width:0}
+.chat-input input{flex:1}
+.chat-meta{font-size:13px;color:var(--muted)}
+.chat-meta .linkish[disabled]{color:var(--muted);cursor:default}
+
 .tip{position:fixed;z-index:20;pointer-events:none;background:var(--ink);color:var(--surface);font-size:12.5px;line-height:1.35;padding:7px 10px;border-radius:7px;max-width:260px;box-shadow:var(--shadow)}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:9px;font-size:14px;max-width:min(520px,calc(100vw - 32px));box-shadow:var(--shadow)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
@@ -286,7 +314,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
   <header class="top">
     <div class="title-block">
       <span class="eyebrow" id="who">Steam library</span>
-      <h1>Backlog Triage</h1>
+      <div class="title-row"><h1>Backlog Triage</h1><span id="chatSlot"></span></div>
       <p class="headline" id="headline">Loading…</p>
       <p class="source-line" id="sourceLine"></p>
     </div>
@@ -340,7 +368,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     </div>
   </section>
 
-  <section class="only-list" style="display:flex;flex-direction:column;gap:14px" aria-labelledby="picksH">
+  <section class="only-list" id="picksSec" style="display:flex;flex-direction:column;gap:14px" aria-labelledby="picksH">
     <div class="section-head">
       <div style="display:flex;flex-direction:column;gap:4px">
         <h2 id="picksH">Couch picks</h2>
@@ -370,7 +398,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     </div>
   </section>
 
-  <section style="display:flex;flex-direction:column;gap:12px" aria-labelledby="listH">
+  <section id="allSec" style="display:flex;flex-direction:column;gap:12px" aria-labelledby="listH">
     <h2 id="listH">All games</h2>
     <div class="filters">
       <div class="field search">
@@ -416,6 +444,18 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     </div>
   </section>
 
+  <section class="only-ask" id="chatSec" aria-labelledby="chatH">
+    <h2 id="chatH">Ask about your backlog</h2>
+    <div class="chat-thread" id="chatThread" aria-live="polite"></div>
+    <form class="chat-form" id="chatForm" autocomplete="off">
+      <div class="chat-input">
+        <input type="text" id="chatQ" enterkeyhint="search" maxlength="500" aria-label="Ask about your backlog" placeholder="Loading your library…" disabled>
+        <button class="btn primary" type="submit" id="chatSend" aria-label="Send" disabled><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2.5 8h11M9 3.5 13.5 8 9 12.5"/></svg></button>
+      </div>
+      <div class="chat-meta" id="chatMeta"></div>
+    </form>
+  </section>
+
   <footer id="foot">Deck ratings come from Valve's Steam Deck compatibility program. Length estimates come from HowLongToBeat's community averages for the main story; the lighter part of each bar is the main story plus extras. Data is as of the export date shown at the top.</footer>
 </div>
 <div class="tip" id="tip" hidden></div>
@@ -448,6 +488,9 @@ const LANES = [
 ];
 const LANE_NAMES = { next: "Up next", someday: "Someday", skip: "Skipped", done: "Finished" };
 const TRIED_MIN = 120;
+// The Ask pill's icon (Cookbook Collection's CHAT_ICON).
+const CHAT_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9a1.5 1.5 0 0 1-1.5 1.5h-8.5L6 20v-3.5H5A1.5 1.5 0 0 1 3.5 15V6A1.5 1.5 0 0 1 5 4.5z"/></svg>`;
+const CHAT_FAIL = "AI search is unavailable right now, try again";
 const PAGE = 60;
 const CHUNK = 200;
 
@@ -501,10 +544,11 @@ const SAMPLE = [
 ];
 
 // ---------------------------------------------------------------- state
-// The page has two modes of one file: the list at "/" and the statistics at "/stats" (or "/stats/"). Both read and
-// write the same filters and URL hash. API() gives a path that works from either URL.
-const MODE = /\/stats\/?$/.test(location.pathname) ? "stats" : "list";
-const BASE = MODE === "stats" ? location.pathname.replace(/stats\/?$/, "") : "";
+// The page has three modes of one file: the list at "/", the statistics at "/stats" (or "/stats/") and Ask at "/ask"
+// (or "/ask/"). The list and the statistics read and write the same filters and URL hash. API() gives a path that
+// works from any of these URLs.
+const MODE = /\/ask\/?$/.test(location.pathname) ? "ask" : /\/stats\/?$/.test(location.pathname) ? "stats" : "list";
+const BASE = MODE === "list" ? "" : location.pathname.replace(/(stats|ask)\/?$/, "");
 const API = (path) => BASE + path;
 const S = {
   games: [],
@@ -535,7 +579,13 @@ const S = {
   yearStep: 1,               // statistics: 1 = by year, 10 = by decade
   stats: null,               // the last statsFor() result
   f: null,                   // filter state, set below
+  chatOn: null,              // Ask: null until bootServer() has finished, then whether api/ask/status allows it
+  chatTurns: 5,              // Ask: questions per thread (api/ask/status "turns")
+  chat: newChat(),           // Ask: the thread. In memory only, never in localStorage or sessionStorage.
 };
+function newChat() {
+  return { thread: [], results: [], draft: "", busy: false, error: null, errorStatus: null, retryable: false, turnsLeft: null };
+}
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 
@@ -882,7 +932,7 @@ function loadInitialFilters() {
 function saveFilters() { try { localStorage.setItem("bt-filters", JSON.stringify({ ...S.f, q: "" })); } catch (e) {} }
 // Links between the list and the statistics carry the current filters in their hash.
 function syncNavHash() {
-  document.querySelectorAll("#pagesNav a[data-keep]").forEach((a) => { a.setAttribute("href", a.dataset.keep + location.hash); });
+  document.querySelectorAll("#pagesNav a[data-keep], #chatTop[data-keep]").forEach((a) => { a.setAttribute("href", a.dataset.keep + location.hash); });
 }
 function writeHash() {
   const s = filtersToParams(S.f).toString();
@@ -1051,7 +1101,7 @@ function lenBar(g, maxH = 60) {
 // Notes and the Up next order are only available on the self-hosted server.
 const canEdit = () => S.server && S.source === "server";
 const orderIndex = (g) => { const i = S.order.indexOf(g.appid); return i < 0 ? 1e9 : i; };
-function editorHtml(g) {
+function editorHtml(g, inAsk) {
   if (!canEdit()) return "";
   const id = g.appid;
   const saved = S.notes.get(id) || "";
@@ -1064,7 +1114,7 @@ function editorHtml(g) {
     if (saved) html += `<div class="g-note">${esc(saved)}</div>`;
     html += `<button type="button" class="linkish" data-note-open="${id}">${saved ? "Edit note" : "Add note"}</button>`;
   }
-  if (lane(g) === "next" && S.f.view === "next") {
+  if (!inAsk && lane(g) === "next" && S.f.view === "next") {
     html += `<div class="move"><button type="button" class="linkish" data-move="${id}" data-dir="-1">Move up</button><button type="button" class="linkish" data-move="${id}" data-dir="1">Move down</button></div>`;
   }
   return html;
@@ -1103,6 +1153,7 @@ function setLibrary(games, source, meta) {
 // ---------------------------------------------------------------- render
 function render() {
   renderHeader();
+  if (MODE === "ask") { renderChat(); return; }
   if (MODE === "stats") { renderStats(); return; }
   renderOverview();
   renderPicks();
@@ -1393,26 +1444,38 @@ function renderList() {
   $("countLine").textContent = `Showing ${vis.length.toLocaleString()} of ${rows.length.toLocaleString()} ${rows.length === 1 ? "game" : "games"}` +
     (n ? ` · ${n} filter${n === 1 ? "" : "s"} on` : "");
   let html = `<div class="row head"><span>Game</span><span>Played</span><span>Deck</span><span>Length (HLTB)</span><span>Triage</span></div>`;
-  if (!vis.length) html += `<div class="empty">No games match these filters.</div>`;
-  html += vis.map((g) => {
-    const meta = [g.genres.slice(0, 3).join(", "), g.year, g.metacritic ? `MC ${g.metacritic}` : ""].filter(Boolean).join(" · ");
-    const la = ago(g.lastPlayed);
-    const draggable = canEdit() && f.view === "next" ? ` draggable="true" data-drag="${g.appid}"` : "";
-    return `<div class="row"${draggable}>
+  if (!vis.length) {
+    const q = f.q.trim();
+    const instead = q && S.chatOn
+      ? `<br><a id="chatInstead" href="${esc(BASE + "ask?draft=" + encodeURIComponent(q) + location.hash)}">Ask instead →</a>` : "";
+    html += `<div class="empty">No games match these filters.${instead}</div>`;
+  }
+  html += vis.map((g) => gameRowHtml(g, { draggable: canEdit() && f.view === "next" })).join("");
+  if (rows.length > vis.length) html += `<div class="more"><button class="btn" type="button" id="moreBtn">Show ${Math.min(PAGE, rows.length - vis.length)} more</button></div>`;
+  $("list").innerHTML = html;
+  focusNoteEditor();
+}
+// One game row, shared by the list and Ask. opts.draggable: the Up next drag handle; opts.ask: no Move buttons.
+function gameRowHtml(g, opts) {
+  const o = opts || {};
+  const meta = [g.genres.slice(0, 3).join(", "), g.year, g.metacritic ? `MC ${g.metacritic}` : ""].filter(Boolean).join(" · ");
+  const la = ago(g.lastPlayed);
+  const draggable = o.draggable ? ` draggable="true" data-drag="${g.appid}"` : "";
+  return `<div class="row"${draggable}>
       <div class="g-name"><a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" rel="noopener">${esc(g.name)}</a>${meta ? `<span class="g-meta">${esc(meta)}</span>` : ""}</div>
       <div class="g-play num">${fmtMin(g.playtime)}${g.deckPlaytime ? `<small>${fmtMin(g.deckPlaytime)} on Deck</small>` : ""}${la && g.playtime ? `<small>${la}</small>` : ""}</div>
       <div class="g-deck">${deckBadge(g.deck)}${protonChip(g)}</div>
       <div class="g-len">${lenBar(g)}</div>
-      <div class="g-lanes">${laneButtons(g, false)}${editorHtml(g)}</div>
+      <div class="g-lanes">${laneButtons(g, false)}${editorHtml(g, o.ask)}</div>
     </div>`;
-  }).join("");
-  if (rows.length > vis.length) html += `<div class="more"><button class="btn" type="button" id="moreBtn">Show ${Math.min(PAGE, rows.length - vis.length)} more</button></div>`;
-  $("list").innerHTML = html;
-  if (S.focusNote !== null) {
-    const ta = document.querySelector(`textarea[data-note-for="${S.focusNote}"]`);
-    S.focusNote = null;
-    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
-  }
+}
+// The rows on screen: Ask's thread or the list. Note edits re-render through this.
+function renderRows() { if (MODE === "ask") renderChat(); else renderList(); }
+function focusNoteEditor() {
+  if (S.focusNote === null) return;
+  const ta = document.querySelector(`textarea[data-note-for="${S.focusNote}"]`);
+  S.focusNote = null;
+  if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
 }
 
 // ---------------------------------------------------------------- statistics view
@@ -1660,11 +1723,13 @@ document.addEventListener("click", (e) => {
     return;
   }
   if (t.id === "moreBtn") { S.shown += PAGE; renderList(); return; }
-  if (t.dataset.noteOpen !== undefined) { const id = Number(t.dataset.noteOpen); S.noteOpen.add(id); S.focusNote = id; renderList(); return; }
-  if (t.dataset.noteCancel !== undefined) { const id = Number(t.dataset.noteCancel); S.noteOpen.delete(id); S.noteDraft.delete(id); renderList(); return; }
+  if (t.dataset.noteOpen !== undefined) { const id = Number(t.dataset.noteOpen); S.noteOpen.add(id); S.focusNote = id; renderRows(); return; }
+  if (t.dataset.noteCancel !== undefined) { const id = Number(t.dataset.noteCancel); S.noteOpen.delete(id); S.noteDraft.delete(id); renderRows(); return; }
   if (t.dataset.noteSave !== undefined) { saveNote(Number(t.dataset.noteSave)); return; }
   if (t.dataset.move !== undefined) { moveNext(Number(t.dataset.move), Number(t.dataset.dir)); return; }
   if (t.dataset.copy !== undefined) { copyText(t.dataset.copy, t); return; }
+  if (t.id === "chatRetry") { chatSend(true); return; }
+  if (t.id === "chatNew") { S.chat = newChat(); $("chatQ").value = ""; renderChat(); $("chatQ").focus(); return; }
 });
 
 function copyText(text, btn) {
@@ -1764,13 +1829,13 @@ function saveNote(id) {
   const prev = S.notes.get(id);
   if (text) S.notes.set(id, text); else S.notes.delete(id);
   S.noteOpen.delete(id); S.noteDraft.delete(id);
-  renderList();
+  renderRows();
   const job = (queues.get("notes") || Promise.resolve()).then(async () => {
     const r = await fetch(API("api/notes"), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appid: id, note: text }) });
     if (!r.ok) throw new Error("HTTP " + r.status);
   }).catch(() => {
     if (prev) S.notes.set(id, prev); else S.notes.delete(id);
-    renderList();
+    renderRows();
     toast("Couldn't save that note. Try again in a moment.");
   });
   queues.set("notes", job);
@@ -1979,6 +2044,110 @@ function renderAsk() {
   o.hidden = false;
 }
 
+// ---------------------------------------------------------------- Ask (self-hosted)
+// /ask: a short thread with Claude over the library, answered by backlog_server.py (POST api/ask). The answer is
+// plain text and always goes through esc(); its games are shown as the list's own rows. The thread lives in S.chat
+// only. The claude.ai artifact's "Ask Claude for a pick" panel (askPanel, S.ask, renderAsk) is separate.
+const chatReady = () => S.chatOn === true && S.source === "server";
+function renderPill() {
+  const href = BASE + "ask";
+  $("chatSlot").innerHTML = S.chatOn
+    ? `<a id="chatTop" href="${esc(href + location.hash)}" data-keep="${esc(href)}" title="Ask about your backlog"${MODE === "ask" ? ' aria-current="page"' : ""}>${CHAT_ICON}Ask</a>` : "";
+}
+function chatItemsHtml(items) {
+  if (!items.length) return "";
+  return `<div class="list chat-rows">${items.map((it) => {
+    const g = S.source === "server" ? S.byId.get(Number(it && it.appid)) : null;
+    return g ? gameRowHtml(g, { ask: true }) : `<div class="chat-missing">${esc(it && it.name)}</div>`;
+  }).join("")}</div>`;
+}
+function chatThreadHtml() {
+  const c = S.chat;
+  let k = 0;
+  const turns = c.thread.map((turn) => {
+    if ("q" in turn) return `<div class="chat-q">${esc(turn.q)}</div>`;
+    return `<div class="chat-turn"><p class="chat-a">${esc(turn.a)}</p>${chatItemsHtml(c.results[k++] || [])}</div>`;
+  }).join("");
+  const busy = c.busy ? `<p class="chat-status" role="status">Thinking…</p>` : "";
+  const err = c.error
+    ? `<div class="chat-error" role="alert"><span>${esc(c.error)}</span>${c.retryable ? `<button type="button" class="btn" id="chatRetry">Retry</button>` : ""}</div>` : "";
+  const hint = !c.thread.length && !c.busy
+    ? `<p class="chat-hint">Ask about your library in your own words: “something short and Verified I’ve never launched”, “what’s in my Up next, shortest first?”</p>` : "";
+  return hint + turns + busy + err;
+}
+function renderChat() {
+  if (MODE !== "ask") return;
+  const c = S.chat, input = $("chatQ"), send = $("chatSend"), meta = $("chatMeta");
+  if (S.chatOn === null) {           // bootServer() hasn't finished: the library isn't here yet
+    $("chatThread").innerHTML = "";
+    input.disabled = send.disabled = true;
+    input.placeholder = "Loading your library…";
+    meta.textContent = "";
+    return;
+  }
+  if (!chatReady()) {
+    const msg = S.chatOn && S.server && S.source !== "server" ? "Ask needs a library export first." : "Ask isn't available here.";
+    $("chatThread").innerHTML = `<p class="chat-hint">${msg} <a href="${esc(BASE)}">Back to the list</a></p>`;
+    input.disabled = send.disabled = true;
+    $("chatForm").hidden = true;
+    return;
+  }
+  $("chatForm").hidden = false;
+  $("chatThread").innerHTML = chatThreadHtml();
+  const left = c.turnsLeft === null ? S.chatTurns : c.turnsLeft;
+  const done = left <= 0 && !c.error;
+  input.disabled = send.disabled = c.busy || done;
+  input.placeholder = done ? "Start a new question to keep going" : "Ask about your backlog…";
+  meta.innerHTML = `<button type="button" class="linkish" id="chatNew"${c.busy ? " disabled" : ""}>New question</button> · ${left} left`;
+  focusNoteEditor();
+}
+async function chatSend(retry) {
+  const c = S.chat;
+  if (c.busy || !chatReady()) return;
+  const last = c.thread[c.thread.length - 1];
+  if (!retry) {
+    const q = (c.draft || "").trim();
+    if (!q) return;
+    if (last && "q" in last) c.thread.pop();   // replace a failed, unanswered question
+    c.thread.push({ q });
+    c.draft = "";
+    $("chatQ").value = "";
+  } else if (!last || !("q" in last)) {
+    return;
+  }
+  c.error = null; c.errorStatus = null; c.retryable = false; c.busy = true;
+  renderChat();
+  try {
+    const r = await fetch(API("api/ask"), { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ thread: c.thread }) });
+    let body = null;
+    try { body = await r.json(); } catch (e) {}
+    if (S.chat !== c) return;             // New question was pressed meanwhile
+    if (!r.ok) {
+      c.error = (body && typeof body.error === "string" && body.error) || CHAT_FAIL;
+      c.errorStatus = r.status;
+      // Retrying can't help a bad request, a sign-in problem or the daily cap (a 429 without Retry-After).
+      c.retryable = ![400, 401, 403].includes(r.status) && !(r.status === 429 && !r.headers.get("Retry-After"));
+    } else {
+      c.thread.push({ a: String((body && body.answer) || "").slice(0, 1000) || "No answer." });
+      c.results.push(body && Array.isArray(body.items) ? body.items : []);
+      if (body && typeof body.turns_left === "number") c.turnsLeft = body.turns_left;
+    }
+  } catch (e) {
+    if (S.chat !== c) return;
+    c.error = CHAT_FAIL; c.errorStatus = null; c.retryable = true;
+  } finally {
+    c.busy = false;
+    if (S.chat === c) {
+      renderChat();
+      const qs = document.querySelectorAll("#chatThread .chat-q");
+      if (qs.length) qs[qs.length - 1].scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }
+}
+$("chatQ").addEventListener("input", (e) => { S.chat.draft = e.target.value; });
+$("chatForm").addEventListener("submit", (e) => { e.preventDefault(); S.chat.draft = $("chatQ").value; chatSend(false); });
+
 // ---------------------------------------------------------------- start
 // ---------------------------------------------------------------- self-hosted mode
 // When served by backlog_server.py, the library and triage marks come from its small API.
@@ -2015,6 +2184,15 @@ async function bootServer() {
   } else {
     renderHeader();
   }
+  try {
+    const a = await fetch(API("api/ask/status"), { cache: "no-store" });
+    const st = a.ok ? await a.json() : null;
+    S.chatOn = !!(st && st.ask === true);
+    if (S.chatOn && Number.isInteger(st.turns) && st.turns > 0) S.chatTurns = st.turns;
+  } catch (e) { S.chatOn = false; }
+  renderPill();
+  if (MODE === "ask") renderChat();
+  else if (MODE === "list" && S.chatOn) renderList();   // the empty list's "Ask instead" link
   initRefresh();
   return true;
 }
@@ -2098,9 +2276,27 @@ function initRefresh() {
 
 $("wrap").dataset.mode = MODE;
 if (MODE === "stats") document.title = "Backlog statistics";
+if (MODE === "ask") {
+  document.title = "Ask your backlog";
+  // "Ask instead" on the list carries the search here as ?draft=: fill the input, don't send, drop it from the URL.
+  const draft = new URLSearchParams(location.search).get("draft");
+  if (draft !== null) {
+    S.chat.draft = draft.slice(0, 500);
+    $("chatQ").value = S.chat.draft;
+    try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
+  }
+}
 try { const m = localStorage.getItem("bt-metric"); if (STAT_METRICS.includes(m)) S.metric = m; } catch (e) {}
 setLibrary(sampleGames(), "sample", null);
-bootServer().then((isServer) => { if (!isServer) { bootDb(); bootSample(); } });
+bootServer().then((isServer) => {
+  if (isServer) return;
+  S.chatOn = false;
+  renderChat();
+  bootDb(); bootSample();
+}).catch(() => {
+  S.chatOn = false;
+  renderChat();
+});
 })();
 </script>
 
