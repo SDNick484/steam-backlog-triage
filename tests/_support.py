@@ -165,6 +165,8 @@ class Server:
             solo.mkdir()
             shutil.copy(SERVER, solo / "backlog_server.py")
             shutil.copy(ROOT / "backlog.html", solo / "backlog.html")
+            for mod in ("ask.py", "backlog_query.py", "access_jwt.py"):  # backlog_server.py imports these
+                shutil.copy(ROOT / mod, solo / mod)
             script = solo / "backlog_server.py"
         self.cmd = [sys.executable, str(script), "--port", str(self.port), "--bind", "127.0.0.1",
                     "--data", str(self.data)]
