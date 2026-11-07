@@ -38,6 +38,7 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     env:
       REQUIRE_NODE: "1"
+      REQUIRE_OPENSSL: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -57,7 +58,10 @@ jobs:
             tests.test_run_export \
             tests.test_privacy_scan \
             tests.test_score_vectors \
-            tests.test_stats 2>&1 | tee unittest.log
+            tests.test_stats \
+            tests.test_backlog_query \
+            tests.test_access_jwt \
+            tests.test_ask 2>&1 | tee unittest.log
       - name: Fail if any test was skipped
         shell: bash
         run: |
@@ -92,7 +96,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python -m unittest -v tests.browser.test_page tests.browser.test_filters tests.browser.test_stats_page 2>&1 | tee page.log
+          python -m unittest -v tests.browser.test_page tests.browser.test_filters tests.browser.test_stats_page tests.browser.test_ask_page 2>&1 | tee page.log
           if grep -Ei '\.\.\. skipped|skipped=' page.log; then echo "::error::a test was skipped"; exit 1; fi
 
   # install/alpine.sh twice (and a third time with one option changed) inside python:3.12-alpine, with apk, rc-*,

@@ -72,8 +72,9 @@ TAB=/etc/crontabs/steam
 SAVED=/etc/steam-backlog-triage.conf
 INIT=/etc/init.d/backlog-triage
 ENVF=$HOME_DIR/.steam-env
+ASKF=$HOME_DIR/.config/backlog-triage/ask.env
 # Start from a machine that has never had the installer (matters when this is re-run in the same VM).
-rm -f "$ENVF" "$SAVED" "$INIT"
+rm -f "$ENVF" "$SAVED" "$INIT" "$ASKF"
 mkdir -p /etc/crontabs /etc/init.d "$HOME_DIR"
 
 # An unrelated job, and a block from an older install that must be replaced rather than duplicated.
@@ -108,8 +109,18 @@ check "exactly one BEGIN" test "$(count '^# BEGIN steam-backlog-triage$' "$TAB")
 check "exactly one END" test "$(count '^# END steam-backlog-triage$' "$TAB")" = 1
 check "installed the files" test -x "$PREFIX/backlog_server.py" -a -x "$PREFIX/run-export.sh" -a -f "$PREFIX/backlog.html"
 check "enabled and restarted the service" grep -q '^rc-service backlog-triage restart' "$CALLS"
+check "installed the Ask modules, mode 644" sh -c "for m in backlog_query access_jwt ask; do [ \"\$(stat -c %a '$PREFIX'/\$m.py)\" = 644 ] || exit 1; done"
+check "the installed server and its modules import (rc-service is stubbed, so nothing started it)" \
+  sh -c "cd '$PREFIX' && python3 -c 'import backlog_server, ask, backlog_query, access_jwt'"
+check "creates ask.env, mode 600" test "$(stat -c %a "$ASKF")" = 600
+check "ask.env settings are all empty" sh -c "grep -qE '^[A-Z_]+=' '$ASKF' && ! grep -E '^[A-Z_]+=' '$ASKF' | grep -qvE '^[A-Z_]+=\$'"
+check "ask.env lists the seven settings" sh -c "for k in ANTHROPIC_SEARCH_KEY ANTHROPIC_SEARCH_MODEL ASK_DAILY_LIMIT ASK_ACCESS_TEAM ASK_ACCESS_AUD ASK_EMAILS ASK_LAN; do grep -q \"^\$k=\" '$ASKF' || exit 1; done"
+check "init script passes --ask-env" grep -q -- "--ask-env $ASKF" "$INIT"
 
 cp "$TAB" "$STUBS/tab.first"
+# The user fills in a key; later runs must never touch ask.env.
+echo "ANTHROPIC_SEARCH_KEY=test-not-a-key" >> "$ASKF"
+cksum < "$ASKF" > "$STUBS/ask.sum"
 
 # ================================================================== re-run: nothing given
 # The user edits the env file between runs; it must survive untouched.
@@ -120,6 +131,8 @@ run second
 
 check "keeps the env file byte for byte" cmp -s "$ENVF" "$STUBS/env.before"
 check "keeps the env file mode 600" test "$(stat -c %a "$ENVF")" = 600
+check "keeps ask.env byte for byte" sh -c "cksum < '$ASKF' | cmp -s - '$STUBS/ask.sum'"
+check "keeps ask.env mode 600" test "$(stat -c %a "$ASKF")" = 600
 check "remembers PORT" grep -q -- "--port 8585 " "$INIT"
 check "remembers NAV" grep -q -- "--nav Deals=http://deals.example.com:8485/" "$INIT"
 check "remembers EXPORT_SCHEDULE" grep -q '^30 5 \* \* 2  ' "$TAB"
@@ -137,6 +150,8 @@ check "an empty NAV removes the link" sh -c "! grep -q -- '--nav' '$INIT'"
 check "the other saved option is kept" grep -q '^30 5 \* \* 2  ' "$TAB"
 check "still exactly one block after the third run" test "$(count '^# BEGIN steam-backlog-triage$' "$TAB")" = 1
 check "the env file still untouched" cmp -s "$ENVF" "$STUBS/env.before"
+check "ask.env still untouched after the third run" sh -c "cksum < '$ASKF' | cmp -s - '$STUBS/ask.sum'"
+check "ask.env still mode 600 after the third run" test "$(stat -c %a "$ASKF")" = 600
 
 # ================================================================== refusals
 printf '\n--- refusals\n'
