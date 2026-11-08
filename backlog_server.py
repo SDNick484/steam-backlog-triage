@@ -5,6 +5,7 @@ backlog_server.py - serve the Backlog Triage dashboard.
 Standard library only. Serves:
   GET  /                the dashboard page
   GET  /stats           the same page, showing its Statistics view (also /stats/)
+  GET  /ask             the same page, showing Ask (also /ask/)
   GET  /api/library     the latest steam_backlog.json (404 until the first export)
   PUT  /api/library     replace it (the page's "Load export" button)
   GET  /api/triage      {appid: lane} for Next / Someday / Skip / Done marks
@@ -15,6 +16,9 @@ Standard library only. Serves:
   PUT  /api/order       {"order": [620, 1145360, ...]}  (a list of distinct app ids)
   POST /api/export      start a library export (run-export.sh) in the background
   GET  /api/export/status   the running or last export: state, phase, progress, recent log lines
+  GET  /api/ask/status {"ask": true, "turns": 5} when this request may use Ask, else {"ask": false}
+  POST /api/ask         {"thread": [{"q": "..."}, ...]}: a plain-language question about the library, answered
+                        by Claude over read-only tools (ask.py; off until ask.env has a key)
   GET  /healthz         "ok"
 
 Notes and order live in notes.json and order.json next to triage.json.
@@ -25,18 +29,20 @@ answering 304 when it still matches. Their PUTs honor an optional If-Match (412 
 resource changed since that ETag) and return the previous value; with no If-Match they
 behave as they always did.
 
-There is no authentication. Bind it to your LAN or a VPN, or put it behind an
+There is no authentication (Ask aside, which needs a Cloudflare Access login or, with ASK_LAN=1, a
+direct LAN request). Bind it to your LAN or a VPN, or put it behind an
 authenticating proxy (for example Cloudflare Access); don't expose it directly.
 
 Exports run the --export-cmd command (default: run-export.sh next to this file) as a child
 process, one at a time. That includes runs started by cron: they hold the same lock file
-(<data>/.export.lock), so the server sees them as running too. No keys pass through the server;
-run-export.sh reads ~/.steam-env itself.
+(<data>/.export.lock), so the server sees them as running too. The export never sees a key:
+run-export.sh reads ~/.steam-env itself. Ask's Anthropic key is read from ask.env into memory, sent
+only to api.anthropic.com, and never logged or sent to the browser.
 
 Usage:
   backlog_server.py [--port 8484] [--bind 0.0.0.0] [--data DIR] [--page backlog.html]
                     [--nav "Deals=https://deals.example.com/"] ...
-                    [--export-cmd PATH] [--export-timeout SECONDS]
+                    [--export-cmd PATH] [--export-timeout SECONDS] [--ask-env PATH]
 """
 
 from __future__ import annotations
@@ -56,6 +62,10 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import ask
+import backlog_query
+from access_jwt import Verifier
 
 # Bumped only for changes a client must know about. API 1 is the original server; API 2 adds
 # ETags, conditional PUTs, `previous` values and the export routes. Clients read it from the
@@ -150,6 +160,11 @@ class App:
         self._lib_etag: str | None = None
         # main() replaces this with one that has an export command; until then exports are off.
         self.exporter = Exporter(self, None, EXPORT_TIMEOUT)
+        # Normalized games for Ask, keyed by the library's ETag: (etag, games, exportedAt).
+        self._ask_mu = threading.Lock()
+        self._ask_games: tuple[str, list, str | None] | None = None
+        # main() replaces this with one built from ask.env; until then Ask is off.
+        self.ask = ask.Ask(None, self.data_dir, self.ask_snapshot)
 
     def library_etag_and_body(self, want_body: bool) -> tuple[str, bytes | None]:
         """Return (etag, body) for the library; body is None only if it wasn't needed and the ETag
@@ -167,6 +182,39 @@ class App:
             with self._lib_mu:
                 self._lib_key, self._lib_etag = key, etag
         return etag, body
+
+    def ask_snapshot(self) -> backlog_query.Snapshot | None:
+        """The library as Ask's tools see it, or None before the first export. Games are normalized once per
+        ETag; triage, notes and order are read under the same lock their writers take. The SteamID and persona
+        are never copied in."""
+        try:
+            etag, body = self.library_etag_and_body(False)
+            with self._ask_mu:
+                cached = self._ask_games if self._ask_games and self._ask_games[0] == etag else None
+            if cached is None:
+                if body is None:
+                    etag, body = self.library_etag_and_body(True)
+                data = json.loads(body or b"")
+                games = data.get("games") if isinstance(data, dict) else None
+                if not isinstance(games, list):
+                    return None
+                exported = data.get("exportedAt")
+                cached = (etag, [backlog_query.normalize(g, i) for i, g in enumerate(games) if isinstance(g, dict)],
+                          exported if isinstance(exported, str) else None)
+                with self._ask_mu:
+                    self._ask_games = cached
+        except (OSError, ValueError):  # no export yet, or one that can't be read
+            return None
+        with self.lock:
+            triage, notes, order = self.read_triage(), self.read_notes(), self.read_order()
+        ids = lambda m: {int(k): v for k, v in (m.items() if isinstance(m, dict) else ())
+                         if isinstance(k, str) and k.isascii() and k.isdigit() and isinstance(v, str) and v}
+        return backlog_query.Snapshot(
+            games=list(cached[1]),
+            triage={k: v for k, v in ids(triage).items() if v in LANES},
+            notes=ids(notes),
+            order=[a for a in order if is_app_id(a)] if isinstance(order, list) else [],
+            exported_at=cached[2])
 
     def page_bytes(self) -> bytes:
         with open(self.page, "rb") as f:
@@ -532,8 +580,23 @@ def make_handler(app: App):
                 return self.json(501, {"error": "export not configured on this server"})
             self.json(200, app.exporter.status())
 
+        def ask_post(self) -> None:
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if n < 0 or n > POST_MAX:
+                self.drain_body()
+                return self.json(400, {"error": ask.INVALID})
+            raw = self.rfile.read(n) if n else b""
+            status, body, extra = app.ask.handle(self.headers, self.client_address[0],
+                                                 self.headers.get("Content-Type") or "", raw)
+            self.json(status, body, headers=extra)
+
         def do_POST(self):
             path = self.path.split("?", 1)[0]
+            if path == "/api/ask":
+                return self.ask_post()
             if path != "/api/export":
                 self.drain_body()
                 return self.json(404, {"error": "not found"})
@@ -576,7 +639,7 @@ def make_handler(app: App):
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
-            if path in ("/", "/index.html", "/stats", "/stats/"):
+            if path in ("/", "/index.html", "/stats", "/stats/", "/ask", "/ask/"):
                 try:
                     return self.send(200, app.page_bytes(), "text/html; charset=utf-8")
                 except OSError:
@@ -599,6 +662,8 @@ def make_handler(app: App):
                 return self.small_resource(app.read_order)
             if path == "/api/export/status":
                 return self.export_status()
+            if path == "/api/ask/status":
+                return self.json(200, app.ask.status(self.headers, self.client_address[0]))
             if path == "/healthz":
                 return self.send(200, b"ok", "text/plain")
             self.json(404, {"error": "not found"})
@@ -716,6 +781,8 @@ def main() -> None:
                          "(default: run-export.sh next to this file, if it is executable)")
     ap.add_argument("--export-timeout", type=int, default=EXPORT_TIMEOUT, metavar="SECONDS",
                     help="Stop an export that this server started after this long (default: %(default)s)")
+    ap.add_argument("--ask-env", metavar="PATH", default=os.path.expanduser("~/.config/backlog-triage/ask.env"),
+                    help="Ask settings: the Anthropic key and who may ask (default: %(default)s)")
     args = ap.parse_args()
     if args.export_timeout <= 0:
         raise SystemExit("--export-timeout must be a positive number of seconds")
@@ -731,11 +798,17 @@ def main() -> None:
     os.makedirs(args.data, exist_ok=True)
     app = App(args.page, args.data, parse_nav(args.nav))
     app.exporter = Exporter(app, cmd, args.export_timeout)
+    settings, ask_line = ask.load_settings(args.ask_env)
+    verifier = None
+    if settings is not None and settings.access:
+        verifier = Verifier(settings.access_team, settings.access_aud, settings.emails)
+    app.ask = ask.Ask(settings, app.data_dir, app.ask_snapshot, verifier)
     srv = ThreadingHTTPServer((args.bind, args.port), make_handler(app))
     print(f"Backlog Triage on http://{args.bind}:{args.port}/ (data in {args.data})", file=sys.stderr, flush=True)
     print("Exports: " + (f"enabled ({os.path.basename(cmd)}, {args.export_timeout}s limit)" if cmd
                          else "off (no --export-cmd and no run-export.sh beside the server)"),
           file=sys.stderr, flush=True)
+    print(ask_line, file=sys.stderr, flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

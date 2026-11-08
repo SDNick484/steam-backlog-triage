@@ -14,7 +14,10 @@
 #                    e.g. NAV=Deals=http://deals-host:8485/
 #   TZ_NAME          set the system time zone, e.g. America/New_York (default: leave as is)
 #
-# Safe to re-run: code is updated, ~/.steam-env and your data are kept, and the options above
+# Ask (AI search) is configured in ~/.config/backlog-triage/ask.env, created empty on first install; it stays
+# off until you set ANTHROPIC_SEARCH_KEY there. See the README's "AI search (Ask)" section.
+#
+# Safe to re-run: code is updated, ~/.steam-env, ask.env and your data are kept, and the options above
 # are remembered (in /etc/steam-backlog-triage.conf). Set NAV= (empty) to remove a link.
 set -eu
 
@@ -51,7 +54,7 @@ mkdir -p "$PREFIX" "$HOME_DIR/exports" "$HOME_DIR/logs"
 
 say "Installing to $PREFIX"
 install -m 0755 "$SRC/steam_backlog_export.py" "$SRC/backlog_server.py" "$SRC/run-export.sh" "$PREFIX/"
-install -m 0644 "$SRC/backlog.html" "$PREFIX/"
+install -m 0644 "$SRC/backlog.html" "$SRC/backlog_query.py" "$SRC/access_jwt.py" "$SRC/ask.py" "$PREFIX/"
 
 say "Setting up a Python venv for HowLongToBeat lookups"
 [ -x "$PREFIX/venv/bin/python" ] || python3 -m venv "$PREFIX/venv" </dev/null
@@ -71,6 +74,38 @@ STEAM_PROFILE='${STEAM_PROFILE:-}'
 EOF
   umask 022
   echo "Wrote $ENVF"
+fi
+
+# Ask settings. Created once (empty, so Ask stays off) and never touched again.
+ASK_DIR="$HOME_DIR/.config/backlog-triage"
+ASKF="$ASK_DIR/ask.env"
+mkdir -p "$ASK_DIR"
+chmod 700 "$ASK_DIR"
+if [ ! -f "$ASKF" ]; then
+  umask 077
+  cat > "$ASKF" <<'EOF'
+# Settings for Ask (AI search), read by backlog_server.py at start-up. KEY=VALUE, one per line.
+# Ask is off until ANTHROPIC_SEARCH_KEY is set. Edit this file (it must stay mode 600), then run:
+#   rc-service backlog-triage restart
+# See the README section "AI search (Ask)" for where to find each value.
+
+# Anthropic API key, ideally from its own Console workspace with a spend limit.
+ANTHROPIC_SEARCH_KEY=
+# Model id; empty means claude-haiku-5-5.
+ANTHROPIC_SEARCH_MODEL=
+# Questions per day across everyone; empty means 200.
+ASK_DAILY_LIMIT=
+# Cloudflare Access team domain, e.g. your-team.cloudflareaccess.com
+ASK_ACCESS_TEAM=
+# The dashboard's Access application Audience (AUD) tag.
+ASK_ACCESS_AUD=
+# Comma-separated emails allowed to ask; empty means any user Access lets in.
+ASK_EMAILS=
+# 1 = also allow direct requests from your LAN, opened by IP address (see the README); empty or 0 = off.
+ASK_LAN=
+EOF
+  umask 022
+  echo "Wrote $ASKF"
 fi
 chown -R "$APP_USER:$APP_USER" "$HOME_DIR"
 chown -R root:root "$PREFIX"
@@ -98,7 +133,7 @@ cat > /etc/init.d/backlog-triage <<EOF
 name="backlog-triage"
 description="Steam Backlog Triage dashboard"
 command="/usr/bin/python3"
-command_args="$PREFIX/backlog_server.py --port $PORT --data $HOME_DIR/exports $NAV_ARG"
+command_args="$PREFIX/backlog_server.py --port $PORT --data $HOME_DIR/exports --ask-env $ASKF $NAV_ARG"
 command_user="$APP_USER:$APP_USER"
 supervisor="supervise-daemon"
 respawn_delay=5
@@ -131,5 +166,6 @@ EOF
 
 say "Done"
 echo "Steam settings: $ENVF"
+echo "Ask settings: $ASKF"
 echo "Run an export now: su $APP_USER -c $PREFIX/run-export.sh"
 echo "Logs: $HOME_DIR/logs/"
