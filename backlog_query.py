@@ -50,7 +50,7 @@ PLAYS = ("never", "tried", "played")
 LANE_F = ("none", "next", "someday", "skip", "done")
 MC_OPTS = (60, 70, 75, 80, 85, 90)
 MC_MAX_OPTS = (59, 69, 79, 89)
-UNK_KEYS = ("gen", "pub", "dev", "pt", "mc", "yr", "ctrl", "rv")
+UNK_KEYS = ("gen", "pub", "dev", "tag", "pt", "mc", "yr", "ctrl", "rv")
 NAME_SUFFIXES = ("inc", "llc", "ltd", "co", "corp", "corporation", "gmbh", "sa", "ab", "limited")
 REVIEW_LEVELS = (
     ("overwhelmingly-positive", "Overwhelmingly Positive"), ("very-positive", "Very Positive"),
@@ -174,6 +174,18 @@ def name_key(raw: Any) -> str:
     return " ".join(t)
 
 
+# A few names people use for a Steam tag, mapped onto that tag's key (the page's TAG_ALIASES).
+TAG_ALIASES = {"soulsborne": "soulslike", "soulsbourne": "soulslike"}
+
+
+def tag_key(raw: Any) -> str:
+    """The page's tagKey(): NFKC, lower case, letters and digits only, then the alias table. "Souls-like",
+    "souls like" and "Soulslike" share a key, and so does "Soulsborne"."""
+    text = unicodedata.normalize("NFKC", "" if raw is None else str(raw)).lower()
+    k = "".join(c for c in text if unicodedata.category(c)[0] in "LN")
+    return TAG_ALIASES.get(k, k)
+
+
 # --------------------------------------------------------------------------- games
 @dataclass(frozen=True)
 class Hltb:
@@ -222,6 +234,8 @@ class Game:
     pub_keys: tuple[str, ...] = ()
     dev_keys: tuple[str, ...] = ()
     reviews: Reviews | None = None
+    tags: tuple[str, ...] = ()  # Steam store tags as Steam spells them, in vote order
+    tag_keys: tuple[str, ...] = ()  # tag_key() of each, deduplicated
 
 
 def _names(v: Any) -> tuple[str, ...]:
@@ -231,8 +245,12 @@ def _names(v: Any) -> tuple[str, ...]:
     return tuple(x.strip() for x in v if isinstance(x, str) and x.strip())[:10]
 
 
+def _keys_by(key_fn: Callable[[Any], str], names: Sequence[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(k for k in map(key_fn, names) if k))
+
+
 def _keys(names: Sequence[str]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(k for k in map(name_key, names) if k))
+    return _keys_by(name_key, names)
 
 
 def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
@@ -263,6 +281,7 @@ def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
     elif isinstance(r, list):  # a JS array is an object too: no usable fields
         reviews = Reviews(0.0, None, None)
     publishers, developers = _names(raw.get("publishers")), _names(raw.get("developers"))
+    tags = _names(raw.get("tags"))
     return Game(
         appid=int(appid) if isinstance(appid, int | float) and not isinstance(appid, bool) else 0,
         name=str(name) if name else f"App {appid}",
@@ -282,6 +301,7 @@ def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
         publishers=publishers, developers=developers,
         pub_keys=_keys(publishers), dev_keys=_keys(developers),
         reviews=reviews,
+        tags=tags, tag_keys=_keys_by(tag_key, tags),
     )
 
 
@@ -348,6 +368,8 @@ def is_unknown(g: Game, k: str) -> bool:
         return not g.pub_keys
     if k == "dev":
         return not g.dev_keys
+    if k == "tag":
+        return not g.tag_keys
     if k == "pt":
         return not (g.proton and g.proton.tier)
     if k == "mc":
@@ -439,6 +461,8 @@ class Filters:
     publishers_unknown: bool = False
     developers: tuple[str, ...] = ()
     developers_unknown: bool = False
+    tags: tuple[str, ...] = ()  # normalized keys (tag_key)
+    tags_unknown: bool = False
     reviews: tuple[str, ...] = ()
     reviews_unknown: bool = False
     unknown_only: tuple[str, ...] = ()  # UNK_KEYS
@@ -463,6 +487,8 @@ class Filters:
             names.append("publishers")
         if self.developers:
             names.append("developers")
+        if self.tags:
+            names.append("tags")
         if self.genres:
             names.append("genres")
         if self.has_note is not None:
@@ -489,6 +515,7 @@ class Filters:
             "controller": {"controller": (), "controller_unknown": False},
             "publishers": {"publishers": (), "publishers_unknown": False},
             "developers": {"developers": (), "developers_unknown": False},
+            "tags": {"tags": (), "tags_unknown": False},
             "genres": {"genres": (), "genres_unknown": False},
             "has_note": {"has_note": None},
             "unknown_only": {"unknown_only": ()},
@@ -553,6 +580,8 @@ def clean(raw: Mapping[str, Any]) -> Filters:
         publishers_unknown=o.get("pubUnk") is True,
         developers=_names_in(o.get("dev")),
         developers_unknown=o.get("devUnk") is True,
+        tags=_keys_by(tag_key, _names_in(o.get("tag"))),
+        tags_unknown=o.get("tagUnk") is True,
         reviews=tuple(_pick_in(o.get("rv"), REVIEW_KEYS)),
         reviews_unknown=o.get("rvUnk") is True,
         unknown_only=tuple(_pick_in(o.get("unk"), UNK_KEYS)),
@@ -611,6 +640,12 @@ def passes(g: Game, f: Filters, triage: Mapping[int, str], notes: Mapping[int, s
             if not f.developers_unknown:
                 return False
         elif not any(k in f.developers for k in g.dev_keys):
+            return False
+    if f.tags:
+        if not g.tag_keys:
+            if not f.tags_unknown:
+                return False
+        elif not any(k in f.tags for k in g.tag_keys):
             return False
     if f.reviews:
         b = review_bucket(g)
@@ -823,7 +858,7 @@ STAT_LABELS: dict[str, dict[Any, str]] = {
 }
 LEN_ORDER = ("short", "mid", "long", "epic")
 LANE_ORDER = ("next", "someday", "skip", "done")
-STAT_DIMS = ("gen", "pub", "dev", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year")
+STAT_DIMS = ("gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year")
 
 
 def _stat_row(key: Any, label: str) -> dict[str, Any]:
@@ -842,9 +877,10 @@ def name_groups(games: Iterable[Game], field_: str) -> dict[str, dict[str, Any]]
     """key -> {key, label, n}: n counts games once each; label is the most common spelling (ties: A to Z)."""
     groups: dict[str, dict[str, Any]] = {}
     for g in games:
-        raws, keys = (g.publishers, g.pub_keys) if field_ == "pub" else (g.developers, g.dev_keys)
+        raws, keys, key_fn = {"pub": (g.publishers, g.pub_keys, name_key), "dev": (g.developers, g.dev_keys, name_key),
+                              "tag": (g.tags, g.tag_keys, tag_key)}[field_]
         for raw in raws:
-            key = name_key(raw)
+            key = key_fn(raw)
             if not key:
                 continue
             e = groups.setdefault(key, {"key": key, "label": "", "n": 0, "spell": {}})
@@ -859,8 +895,9 @@ def name_groups(games: Iterable[Game], field_: str) -> dict[str, dict[str, Any]]
 
 
 def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[Game], str] | None = None,
-              pub_labels: Mapping[str, str] | None = None, dev_labels: Mapping[str, str] | None = None) -> dict:
-    """The page's statsFor(): ``{"tiles": {...}, "dims": {gen, pub, dev, deck, pt, ctrl, len, lane, mc, rv, year}}``
+              pub_labels: Mapping[str, str] | None = None, dev_labels: Mapping[str, str] | None = None,
+              tag_labels: Mapping[str, str] | None = None) -> dict:
+    """The page's statsFor(): ``{"tiles": {...}, "dims": {gen, pub, dev, tag, deck, pt, ctrl, len, lane, mc, rv, year}}``
     with the same camelCase keys; json.dumps of it equals JSON.stringify of the page's result."""
     dsrc = dsrc if dsrc in SRCS else "main"
     lane_fn = lane_of if callable(lane_of) else (lambda _g: "")
@@ -868,6 +905,8 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
         pub_labels = {k: e["label"] for k, e in name_groups(games, "pub").items()}
     if dev_labels is None:
         dev_labels = {k: e["label"] for k, e in name_groups(games, "dev").items()}
+    if tag_labels is None:
+        tag_labels = {k: e["label"] for k, e in name_groups(games, "tag").items()}
     rows: dict[str, dict[Any, dict[str, Any]]] = {d: {} for d in STAT_DIMS}
     unknown: dict[str, dict[str, Any] | None] = {d: None for d in STAT_DIMS}
     known = {d: 0 for d in STAT_DIMS}
@@ -928,6 +967,12 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
                 put("dev", k, dev_labels.get(k) or k, g, st)
         else:
             unk("dev", "", "Unknown", g, st)
+        if g.tag_keys:
+            known["tag"] += 1
+            for k in g.tag_keys:
+                put("tag", k, tag_labels.get(k) or k, g, st)
+        else:
+            unk("tag", "", "Unknown", g, st)
         if g.deck:
             known["deck"] += 1
             put("deck", g.deck, STAT_LABELS["deck"][g.deck], g, st)
@@ -984,7 +1029,7 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
         return [rows[d][k] for k in order if k in rows[d]]
 
     out: dict[str, dict[str, Any]] = {}
-    for d in ("gen", "pub", "dev"):
+    for d in ("gen", "pub", "dev", "tag"):
         out[d] = {"rows": sorted(rows[d].values(), key=lambda r: (-r["n"], _u16(r["label"])))}
     out["deck"] = {"rows": ordered("deck", (3, 2, 1))}
     out["pt"] = {"rows": ordered("pt", TIERS)}
@@ -1098,11 +1143,11 @@ def _str_list(name: str, v: Any, max_items: int, max_len: int) -> list[str]:
     return list(items)
 
 
-_UNK_TOOL = {"genres": "gen", "publishers": "pub", "developers": "dev", "protondb": "pt", "metacritic": "mc",
+_UNK_TOOL = {"genres": "gen", "publishers": "pub", "developers": "dev", "tags": "tag", "protondb": "pt", "metacritic": "mc",
              "year": "yr", "controller": "ctrl", "reviews": "rv"}
 _INCLUDE_FLAG = {"genres": "genres_unknown", "length": "length_unknown", "protondb": "protondb_unknown",
                  "metacritic": "metacritic_unknown", "year": "year_unknown", "controller": "controller_unknown",
-                 "publishers": "publishers_unknown", "developers": "developers_unknown",
+                 "publishers": "publishers_unknown", "developers": "developers_unknown", "tags": "tags_unknown",
                  "reviews": "reviews_unknown"}
 
 
@@ -1111,7 +1156,7 @@ def tool_filters(*, query: str | None = None, genres: Any = None, genre_match: s
                  hours_max: float | None = None, deck: Any = None, protondb: Any = None,
                  protondb_min: str | None = None, metacritic_min: Any = None, metacritic_max: Any = None,
                  year_from: Any = None, year_to: Any = None, controller: Any = None, publishers: Any = None,
-                 developers: Any = None, reviews: Any = None, play_state: Any = None, lane: Any = None,
+                 developers: Any = None, tags: Any = None, reviews: Any = None, play_state: Any = None, lane: Any = None,
                  has_note: bool | None = None, include_unknown: Any = None, unknown_only: Any = None) -> Filters:
     """Tool-shaped arguments (spec 7.5 names and enums) -> Filters. A bad value raises QueryError."""
     kw: dict[str, Any] = {}
@@ -1152,6 +1197,8 @@ def tool_filters(*, query: str | None = None, genres: Any = None, genre_match: s
         kw["publishers"] = tuple(dict.fromkeys(k for k in map(name_key, _str_list("publishers", publishers, 10, 80)) if k))
     if developers is not None:
         kw["developers"] = tuple(dict.fromkeys(k for k in map(name_key, _str_list("developers", developers, 10, 80)) if k))
+    if tags is not None:  # any spelling: matched by tag_key ("soulslike", "Souls-like", "souls like", "soulsborne")
+        kw["tags"] = _keys_by(tag_key, _str_list("tags", tags, 10, 80))
     if reviews is not None:
         kw["reviews"] = _enum_list("reviews", reviews, REVIEW_KEYS)
     if play_state is not None:
@@ -1206,6 +1253,7 @@ def _detail(g: Game, snap: Snapshot) -> dict[str, Any]:
         "hltb": {"main": g.hltb.main, "extra": g.hltb.extra, "complete": g.hltb.complete} if g.hltb else None,
         "protondb_reports": int(g.proton.total) if g.proton else None,
         "genres": list(g.genres), "publishers": list(g.publishers), "developers": list(g.developers),
+        "tags": list(g.tags),
         "reviews": {"desc": g.reviews.desc, "pct": g.reviews.pct, "total": g.reviews.total} if g.reviews else None,
         "controller": controller,
         "note": snap.notes.get(g.appid),
@@ -1296,7 +1344,7 @@ def next_queue_out(snap: Snapshot) -> dict[str, Any]:
             "detail": f"{len(q)} games in Up next, in queue order."}
 
 
-_STAT_DIM = {"genre": "gen", "publisher": "pub", "developer": "dev", "deck": "deck", "protondb": "pt",
+_STAT_DIM = {"genre": "gen", "publisher": "pub", "developer": "dev", "tags": "tag", "deck": "deck", "protondb": "pt",
              "controller": "ctrl", "length": "len", "lane": "lane", "metacritic": "mc", "reviews": "rv",
              "year": "year", "decade": "year"}
 
@@ -1317,7 +1365,7 @@ def stats_out(snap: Snapshot, filters: Filters, *, dimension: str, metric: str =
     dim = st["dims"][d]
     rows: list[dict[str, Any]] = dim["rows"]
     other: dict[str, Any] | None
-    if d in ("gen", "pub", "dev"):
+    if d in ("gen", "pub", "dev", "tag"):
         rows, other = fold_rows(rank_rows(rows, metric), 25)
     elif dimension == "decade":
         rows, other = fold_rows(year_buckets(rows, 10), 25)

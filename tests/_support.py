@@ -262,6 +262,9 @@ class MockSteam:
     Behavior per app id is set with `deck`, `details`, `reviews` and `proton`: appid -> a list of canned
     responses used in order (the last one repeats). A canned response is a (status, body, headers)
     tuple, where body is bytes or JSON-serializable. Anything not listed gets a normal 200 answer.
+    Store tags: `tags` maps appid -> tag ids (default DEFAULT_TAG_IDS), `tags_omit` is a set of app ids left
+    out of GetItems answers, `tags_batch` is a list of canned responses for GetItems calls (by call number,
+    the last repeats) and `taglist` the same for GetTagList; `tag_batches` records the app ids of each call.
     `hits` counts requests per route key ("owned", "persona", "deck:<appid>", ...).
     """
 
@@ -272,6 +275,11 @@ class MockSteam:
         self.details: dict[int, list] = {}
         self.proton: dict[int, list] = {}
         self.reviews: dict[int, list] = {}
+        self.tags: dict[int, list[int]] = {}
+        self.tags_omit: set[int] = set()
+        self.tags_batch: list = []
+        self.taglist: list = []
+        self.tag_batches: list[list[int]] = []
         self.hits: dict[str, int] = {}
         self.paths: list[str] = []
         self._mu = threading.Lock()
@@ -330,6 +338,10 @@ class MockSteam:
             route, appid = "deck", int(q["nAppID"][0])
         elif u.path.endswith("/api/appdetails"):
             route, appid = "details", int(q["appids"][0])
+        elif u.path.endswith("/IStoreBrowseService/GetItems/v1"):
+            route = "tags"
+        elif u.path.endswith("/IStoreService/GetTagList/v1/"):
+            route = "taglist"
         elif u.path.startswith("/appreviews/"):
             route, appid = "reviews", int(u.path.rsplit("/", 1)[1])
         elif u.path.startswith("/api/v1/reports/summaries/"):
@@ -364,6 +376,27 @@ class MockSteam:
                 "publishers": ["Test Publisher Inc."],
                 "developers": ["Test Studio"],
             }}})
+        if route == "taglist":
+            with self._mu:
+                canned = self.taglist[min(self.hits[key], len(self.taglist)) - 1] if self.taglist else None
+            return self._send(h, *canned) if canned else self._send(h, 200, {"response": {
+                "version_hash": "1", "tags": [{"tagid": i, "name": n} for i, n in DEFAULT_TAG_NAMES.items()]}})
+        if route == "tags":
+            req = json.loads(q["input_json"][0])
+            asked = [i["appid"] for i in req["ids"]]
+            with self._mu:
+                self.tag_batches.append(asked)
+                canned = self.tags_batch[min(self.hits[key], len(self.tags_batch)) - 1] if self.tags_batch else None
+            if canned:
+                return self._send(h, *canned)
+            items = []
+            for a in asked:
+                if a in self.tags_omit:
+                    continue
+                items.append({"item_type": 0, "id": a, "success": 1, "visible": True, "appid": a, "name": f"App {a}",
+                              "tagids": self.tags.get(a, DEFAULT_TAG_IDS),
+                              "tags": [{"tagid": t, "weight": 100 - i} for i, t in enumerate(self.tags.get(a, DEFAULT_TAG_IDS))]})
+            return self._send(h, 200, {"response": {"store_items": items}})
         if route == "reviews":
             canned = self._canned(self.reviews, appid, key)
             if canned:
@@ -388,6 +421,13 @@ class MockSteam:
             h.send_header(k, v)
         h.end_headers()
         h.wfile.write(data)
+
+
+# Real Steam tag ids and names (IStoreService/GetTagList), in the order a game's tags would come back.
+DEFAULT_TAG_NAMES = {19: "Action", 122: "RPG", 492: "Indie", 1628: "Metroidvania", 1695: "Open World",
+                     1716: "Roguelike", 3871: "2D", 3959: "Roguelite", 3964: "Pixel Graphics", 4026: "Difficult",
+                     4182: "Singleplayer", 29482: "Souls-like"}
+DEFAULT_TAG_IDS = [29482, 4026, 122]  # Souls-like, Difficult, RPG
 
 
 def default_owned_games() -> list[dict]:

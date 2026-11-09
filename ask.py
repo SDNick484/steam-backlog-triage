@@ -266,14 +266,16 @@ FILTER_PROPS = {
     "controller": _enum_list(bq.CTRLS, "Controller support."),
     "publishers": _names(10, "Publisher names."),
     "developers": _names(10, "Developer names."),
+    "tags": _names(10, "Steam store tags (players' own labels), e.g. Metroidvania, Souls-like, Roguelike. Spelling "
+                       "and case are forgiving (soulslike, souls like, soulsborne). Matches any of them."),
     "reviews": _enum_list(bq.REVIEW_KEYS, "Steam user review levels."),
     "play_state": _enum_list(bq.PLAYS, "never = 0 min, tried = under 2 h, played = 2 h or more."),
     "lane": _enum_list(("next", "someday", "skip", "done", "none"), "Triage lanes; none = untriaged."),
     "has_note": {"type": "boolean", "description": "Only games with (true) or without (false) a note."},
     "include_unknown": _enum_list(("genres", "length", "protondb", "metacritic", "year", "controller",
-                                   "publishers", "developers", "reviews"),
+                                   "publishers", "developers", "tags", "reviews"),
                                   "Also keep games with no data for these filters."),
-    "unknown_only": _enum_list(("genres", "publishers", "developers", "protondb", "metacritic", "year",
+    "unknown_only": _enum_list(("genres", "publishers", "developers", "tags", "protondb", "metacritic", "year",
                                 "controller", "reviews"), "Only games with no data for these."),
 }
 FILTER_TOOLS = {"find_games", "suggest_picks", "get_stats"}
@@ -293,7 +295,7 @@ TOOLS: list[tuple[str, Callable, str, dict]] = [
            "limit": {"type": "integer", "minimum": 1, "maximum": 25, "description": "Rows (1-25, default 10)."},
            "offset": {"type": "integer", "minimum": 0, "description": "Rows to skip."}})),
     ("get_game", bq.game_out,
-     "Full details for one game by app id or name: HLTB times, genres, publishers, reviews, lane, note, Up next "
+     "Full details for one game by app id or name: HLTB times, genres, tags, publishers, reviews, lane, note, Up next "
      "position and score breakdown. An unclear name returns candidates.",
      _obj({"game": {"type": "string", "description": "App id or name."}}, ["game"])),
     ("suggest_picks", bq.picks_out,
@@ -304,7 +306,7 @@ TOOLS: list[tuple[str, Callable, str, dict]] = [
     ("get_next_queue", bq.next_queue_out, "The Up next lane in queue order, with notes.", _obj()),
     ("get_stats", bq.stats_out,
      "Counts by one dimension over the filtered games: rows of games, hours played and play states.",
-     _obj({"dimension": {"type": "string", "enum": ["genre", "publisher", "developer", "deck", "protondb",
+     _obj({"dimension": {"type": "string", "enum": ["genre", "publisher", "developer", "tags", "deck", "protondb",
                                                     "controller", "length", "lane", "metacritic", "reviews",
                                                     "year", "decade"]},
            "metric": {"type": "string", "enum": ["games", "hours", "never"],
@@ -322,7 +324,7 @@ SHOW_RESULTS = {
         "appids": {"type": "array", "items": {"type": "integer"}, "maxItems": MAX_ITEMS}}}}
 
 SYSTEM = """This is one person's Steam library: each game with its Steam Deck rating (Verified, Playable, Unsupported,
-Unknown), ProtonDB tier, HowLongToBeat hours, genres, publishers, developers, Metacritic, Steam user reviews and
+Unknown), ProtonDB tier, HowLongToBeat hours, genres, store tags, publishers, developers, Metacritic, Steam user reviews and
 controller support, plus their own triage. Answer from the tools only.
 - Triage puts a game in one lane: next (Up next, an ordered queue), someday, skip or done. No lane means
   untriaged. Play state comes from playtime: never (0 min), tried (under 2 h), played (2 h or more). The backlog
@@ -332,6 +334,9 @@ controller support, plus their own triage. Answer from the tools only.
   Explain picks from score_breakdown.
 - Missing data (no HLTB time, Unknown Deck rating) means unknown, never zero or bad. Don't invent lengths or
   ratings.
+- Tags (Soulslike, Metroidvania, Roguelike...) are Steam's user-applied store tags, the top 10 per game, matched
+  loosely on spelling (Soulslike finds Souls-like, as does Soulsborne). They may be missing for a game; that means
+  unknown, not "no tags".
 - When a search comes back with exact=false, say which filters were dropped.
 - Answer in one or two sentences; the list carries the detail.
 - Always finish by calling show_results with the app ids of the games you mean, best first.

@@ -610,6 +610,16 @@ class AskTests(AskServerBase):
         self.assertNotIn("view", props["suggest_picks"]["properties"])
         self.assertEqual(props["find_games"]["properties"]["metacritic_min"]["enum"], [60, 70, 75, 80, 85, 90])
         self.assertEqual(props["get_game"]["required"], ["game"])
+        self.assertIn("tags", props["get_stats"]["properties"]["dimension"]["enum"])
+        for tool in ("find_games", "suggest_picks", "get_stats"):
+            self.assertEqual(props[tool]["properties"]["tags"]["maxItems"], 10, tool)
+            self.assertIn("tags", props[tool]["properties"]["include_unknown"]["items"]["enum"], tool)
+        self.assertIn("tags", props["find_games"]["properties"]["unknown_only"]["items"]["enum"])
+        self.assertEqual(set(props["find_games"]["properties"]["include_unknown"]["items"]["enum"]),
+                         set(bq._INCLUDE_FLAG), "the schema enum and the builder agree")
+        self.assertEqual(set(props["find_games"]["properties"]["unknown_only"]["items"]["enum"]), set(bq._UNK_TOOL))
+        self.assertIn("Steam's user-applied store tags", ask.SYSTEM)
+        self.assertIn("may be missing", ask.SYSTEM)
         self.assertEqual(props["get_stats"]["required"], ["dimension"])
 
     def test_run_tool_checks(self):

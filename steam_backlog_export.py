@@ -9,6 +9,7 @@ What it collects for every game you own:
   * genres, Metacritic score, release year, controller support     (optional, --details)
   * publishers and developers                                      (optional, --details)
   * Steam user-review summary (count, % positive, label)           (optional, --details)
+  * store tags: the top 10 user tags (Soulslike, Metroidvania, ...) (optional, --details)
   * ProtonDB tier (native..borked, pending) and report count       (ProtonDB, no key)
 
 Everything it looks up is cached in steam_backlog_cache.json, so the first run is the
@@ -60,11 +61,17 @@ TTL_HLTB = 90
 TTL_DETAILS = 90
 TTL_PROTON = 7
 TTL_REVIEWS = 30
+TTL_TAGS = 30
+TTL_TAGLIST = 30
 REVIEWS_INTERVAL = 3.0  # seconds between review requests: the store rate-limits this endpoint hard
 REVIEWS_MAX_FAILURES = 5  # failures in a row before the reviews step gives up for this run
+TAGS_MAX = 10  # user tags kept per game: Steam's own order, which is by vote weight
+TAGS_BATCH = 50  # app ids per GetItems call (the store answers 200 and refuses 400)
+TAGS_INTERVAL = 1.6  # seconds between tag requests, as for store details
+TAGLIST_KEY = "all"  # the one entry of the "taglist" cache kind: tag id -> name for the whole catalog
 
 # Every cache kind the exporter keeps. Loading ignores kinds not listed here.
-CACHE_KINDS = ("deck", "hltb", "details", "proton", "reviews")
+CACHE_KINDS = ("deck", "hltb", "details", "proton", "reviews", "tags", "taglist")
 
 PROTON_TIERS = {"native", "platinum", "gold", "silver", "bronze", "borked", "pending"}
 
@@ -155,6 +162,12 @@ class FailureStreak:
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
+
+def debug(msg: str) -> None:
+    """Chatty detail, shown only with STEAM_BACKLOG_DEBUG set."""
+    if os.environ.get("STEAM_BACKLOG_DEBUG"):
+        log(msg)
 
 
 # --------------------------------------------------------------------------- Steam Web API
@@ -312,6 +325,94 @@ def review_record(entry) -> dict | None:
     total = v.get("total") or 0
     pct = round(100 * (v.get("positive") or 0) / total) if total else None
     return {"total": total, "pct": pct, "desc": v.get("desc")}
+
+
+def fetch_taglist(limiter: RateLimiter) -> dict[str, str] | None:
+    """Every store tag as {tag id (as a string, so it survives the JSON cache): display name}; None on trouble.
+
+    One call for the whole catalog (about 450 tags). An empty or malformed answer counts as trouble, since
+    caching it would leave every game without tag names for 30 days.
+    """
+    data = http_json(f"{API_BASE}/IStoreService/GetTagList/v1/?language=english", limiter)
+    tags = ((data or {}).get("response") or {}).get("tags") if isinstance(data, dict) else None
+    if not isinstance(tags, list):
+        return None
+    out = {}
+    for t in tags:
+        if isinstance(t, dict) and isinstance(t.get("tagid"), int) and isinstance(t.get("name"), str) and t["name"].strip():
+            out[str(t["tagid"])] = t["name"].strip()
+    return out or None
+
+
+def fetch_tags(appids: list[int], limiter: RateLimiter) -> dict[int, list[int]] | None:
+    """Tag ids for a batch of apps from the store's GetItems: {appid: [tag id, ...]}, None when the call failed.
+
+    Ids come back in vote order and are cut to TAGS_MAX. (`include_tag_count` is the flag that returns them;
+    `include_tag_ids` is silently ignored.) An app the store doesn't know (success != 1) is answered with [],
+    which is a real answer. An app missing from the response altogether is left out, so it isn't cached.
+    """
+    req = {"ids": [{"appid": a} for a in appids],
+           "context": {"language": "english", "country_code": "US", "steam_realm": 1},
+           "data_request": {"include_tag_count": True}}
+    q = urllib.parse.urlencode({"input_json": json.dumps(req, separators=(",", ":"))})
+    data = http_json(f"{API_BASE}/IStoreBrowseService/GetItems/v1?{q}", limiter)
+    items = ((data or {}).get("response") or {}).get("store_items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return None
+    wanted = set(appids)
+    out: dict[int, list[int]] = {}
+    for it in items:
+        if not isinstance(it, dict) or it.get("id") not in wanted:
+            continue
+        ids = it.get("tagids") if it.get("success") == 1 else None
+        out[it["id"]] = [t for t in ids if isinstance(t, int) and not isinstance(t, bool)][:TAGS_MAX] if isinstance(ids, list) else []
+    return out
+
+
+def tag_names(entry, names: dict[str, str]) -> list[str]:
+    """The game record's 'tags' from a cached tag-id list: display names in Steam's order. An id the tag list
+    doesn't know is dropped, never written as a number."""
+    ids = entry.get("v") if entry else None
+    out = []
+    for t in (ids if isinstance(ids, list) else [])[:TAGS_MAX]:
+        if str(t) in names:
+            out.append(names[str(t)])
+        else:
+            debug(f"  tag id {t} has no name in the tag list; dropped")
+    return out
+
+
+def update_tags(appids: list[int], cache: "Cache", limiter: RateLimiter) -> None:
+    """Fill the "taglist" and "tags" cache kinds for the games that need it. A failed call is logged and
+    leaves its games uncached for the next run; nothing here aborts the export."""
+    if cache.get("taglist", TAGLIST_KEY, TTL_TAGLIST) is None:
+        names = fetch_taglist(limiter)
+        if names is not None:
+            cache.put("taglist", TAGLIST_KEY, names)
+            log(f"Store tags: tag list has {len(names)} tags.")
+        else:
+            log("Store tags: couldn't fetch the tag list" + (
+                "; using the older copy." if cache.get("taglist", TAGLIST_KEY, 10**6) else "; tags stay empty this run."))
+    todo = [a for a in appids if cache.get("tags", a, TTL_TAGS) is None]
+    if not todo:
+        log("Store tags: everything cached.")
+        return
+    batches = [todo[i:i + TAGS_BATCH] for i in range(0, len(todo), TAGS_BATCH)]
+    log(f"Store tags: fetching {len(todo)} games in {len(batches)} batches...")
+    failed = 0
+    for n, batch in enumerate(batches, 1):
+        got = fetch_tags(batch, limiter)
+        if got is None:
+            failed += 1
+            log(f"  warning: tag batch {n}/{len(batches)} failed; those {len(batch)} games are tried again next run.")
+            continue
+        for a, ids in got.items():
+            cache.put("tags", a, ids)
+        if len(got) < len(batch):
+            debug(f"  tag batch {n}: {len(batch) - len(got)} apps missing from the response")
+        log(f"  batch {n}/{len(batches)}")
+    if failed:
+        log(f"Store tags: {failed} of {len(batches)} batches failed.")
 
 
 # --------------------------------------------------------------------------- HowLongToBeat
@@ -488,6 +589,9 @@ def main() -> None:
                 log(f"  (about {len(todo) * 1.6 / 60:.0f} minutes for store details)")
             run_parallel("Store details", todo, do_details, workers=2)
 
+            # Store tags: batched, so one request covers TAGS_BATCH games. Cached for TTL_TAGS days.
+            update_tags(appids, cache, RateLimiter(TAGS_INTERVAL))
+
             # Steam user reviews: a separate, lighter endpoint, but still be polite. Cached for TTL_REVIEWS days.
             reviews_limiter = RateLimiter(REVIEWS_INTERVAL)
 
@@ -557,6 +661,8 @@ def main() -> None:
     finally:
         cache.save()
 
+    taglist = cache.get("taglist", TAGLIST_KEY, 10**6)
+    tag_by_id = taglist["v"] if taglist and isinstance(taglist.get("v"), dict) else {}
     games = []
     for g in owned:
         a = g["appid"]
@@ -565,6 +671,7 @@ def main() -> None:
         det = cache.get("details", a, 10**6)
         pr = cache.get("proton", a, 10**6)
         rv = cache.get("reviews", a, 10**6)
+        tg = cache.get("tags", a, 10**6)
         hv = hl["v"] if hl else None
         games.append({
             "appid": a,
@@ -581,6 +688,7 @@ def main() -> None:
             "publishers": (det["v"].get("publishers") if det else None) or [],
             "developers": (det["v"].get("developers") if det else None) or [],
             "reviews": review_record(rv),
+            "tags": tag_names(tg, tag_by_id),
             "proton": pr["v"] if pr else None,
         })
 

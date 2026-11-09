@@ -572,10 +572,12 @@ const S = {
   devLabels: new Map(),
   pubGroups: new Map(),      // normalized publisher key -> { key, label, n }, for the whole library
   devGroups: new Map(),
-  pickQ: { pub: "", dev: "" }, // text typed in the publisher / developer pickers
+  tagGroups: new Map(),      // normalized tag key -> { key, label, n }, for the whole library
+  tagLabels: new Map(),
+  pickQ: { pub: "", dev: "", tag: "" }, // text typed in the publisher / developer / tag pickers
   metric: "games",           // statistics: games | hours | never
-  statShow: { gen: false, pub: false, dev: false }, // statistics: "Show all" expanded
-  statQ: { pub: "", dev: "" },                      // statistics: text typed in the publisher / developer search
+  statShow: { gen: false, pub: false, dev: false, tag: false }, // statistics: "Show all" expanded
+  statQ: { pub: "", dev: "", tag: "" },             // statistics: text typed in the publisher / developer / tag search
   yearStep: 1,               // statistics: 1 = by year, 10 = by decade
   stats: null,               // the last statsFor() result
   f: null,                   // filter state, set below
@@ -607,22 +609,31 @@ function nameKey(raw) {
   }
   return t.join(" ");
 }
-// Adds pubKeys and devKeys (deduplicated normalized keys, blanks dropped) to a game, and makes sure the raw lists exist.
+// Steam store tags are grouped and matched by a looser key: lower case, letters and digits only, so "Souls-like",
+// "souls like" and "Soulslike" are one tag. TAG_ALIASES maps a few other names people use onto a tag's key.
+const TAG_ALIASES = new Map([["soulsborne", "soulslike"], ["soulsbourne", "soulslike"]]);
+function tagKey(raw) {
+  const k = String(raw === null || raw === undefined ? "" : raw).normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return TAG_ALIASES.get(k) || k;
+}
+// Adds pubKeys, devKeys and tagKeys (deduplicated normalized keys, blanks dropped) to a game, and makes sure the raw lists exist.
 function annotateNames(g) {
   const keys = (list) => [...new Set((list || []).map(nameKey).filter(Boolean))];
   g.publishers = Array.isArray(g.publishers) ? g.publishers : [];
   g.developers = Array.isArray(g.developers) ? g.developers : [];
   g.pubKeys = keys(g.publishers);
   g.devKeys = keys(g.developers);
+  g.tags = Array.isArray(g.tags) ? g.tags : [];
+  g.tagKeys = [...new Set(g.tags.map(tagKey).filter(Boolean))];
   return g;
 }
 // key -> { key, label, n }: n counts games (once each), label is the most common original spelling (ties: A to Z).
 function nameGroups(games, field) {
-  const keysOf = field === "pub" ? "pubKeys" : "devKeys", listOf = field === "pub" ? "publishers" : "developers";
+  const [keysOf, listOf, keyOf] = { pub: ["pubKeys", "publishers", nameKey], dev: ["devKeys", "developers", nameKey], tag: ["tagKeys", "tags", tagKey] }[field];
   const groups = new Map();
   for (const g of games) {
     for (const raw of g[listOf] || []) {
-      const key = nameKey(raw);
+      const key = keyOf(raw);
       if (!key) continue;
       let e = groups.get(key);
       if (!e) groups.set(key, (e = { key, label: "", n: 0, spell: new Map() }));
@@ -647,6 +658,7 @@ function normalizeExtras(g) {
   return {
     publishers: names(g.publishers),
     developers: names(g.developers),
+    tags: names(g.tags),
     reviews: r && typeof r === "object"
       ? { total: Math.max(0, n(r.total) || 0), pct: n(r.pct), desc: typeof r.desc === "string" ? r.desc : null }
       : null,
@@ -679,12 +691,13 @@ function mcBucket(g) {
 }
 
 // Dimensions that can be filtered down to "only games with no data" (the f.unk list).
-const UNK_KEYS = ["gen", "pub", "dev", "pt", "mc", "yr", "ctrl", "rv"];
+const UNK_KEYS = ["gen", "pub", "dev", "tag", "pt", "mc", "yr", "ctrl", "rv"];
 function isUnknown(g, k) {
   switch (k) {
     case "gen": return !(g.genres && g.genres.length);
     case "pub": return !(g.pubKeys && g.pubKeys.length);
     case "dev": return !(g.devKeys && g.devKeys.length);
+    case "tag": return !(g.tagKeys && g.tagKeys.length);
     case "pt": return !(g.proton && g.proton.tier);
     case "mc": return !g.metacritic;
     case "yr": return !g.year;
@@ -714,7 +727,7 @@ function median(xs) {
   const a = xs.slice().sort((x, y) => x - y), m = a.length >> 1;
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
-// statsFor(games, { dsrc, laneOf, pubLabels, devLabels }) -> plain object. Pure: it never touches the page.
+// statsFor(games, { dsrc, laneOf, pubLabels, devLabels, tagLabels }) -> plain object. Pure: it never touches the page.
 //   tiles: totals for the set. dims.<name> = { rows, unknown, known, total }:
 //   rows are { key, label, n, minutes, never, tried, played } (n games; a game with several genres, publishers or
 //   developers is counted once under each); unknown is the same shape or null; known counts games with a value.
@@ -724,9 +737,10 @@ function statsFor(games, opts) {
   const laneOf = typeof o.laneOf === "function" ? o.laneOf : () => "";
   const pubLabels = o.pubLabels || new Map([...nameGroups(games, "pub")].map(([k, e]) => [k, e.label]));
   const devLabels = o.devLabels || new Map([...nameGroups(games, "dev")].map(([k, e]) => [k, e.label]));
+  const tagLabels = o.tagLabels || new Map([...nameGroups(games, "tag")].map(([k, e]) => [k, e.label]));
   const row = (key, label) => ({ key, label, n: 0, minutes: 0, never: 0, tried: 0, played: 0 });
   const dims = {};
-  for (const d of ["gen", "pub", "dev", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]) {
+  for (const d of ["gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]) {
     dims[d] = { rows: new Map(), unknown: null, known: 0, total: games.length };
   }
   const bump = (r, g, st) => { r.n++; r.minutes += g.playtime; r[st]++; };
@@ -754,6 +768,7 @@ function statsFor(games, opts) {
     if (genres.length) { dims.gen.known++; genres.forEach((x) => put("gen", x, x, g, st)); } else unk("gen", "", "Unknown", g, st);
     if (g.pubKeys.length) { dims.pub.known++; g.pubKeys.forEach((k) => put("pub", k, pubLabels.get(k) || k, g, st)); } else unk("pub", "", "Unknown", g, st);
     if (g.devKeys.length) { dims.dev.known++; g.devKeys.forEach((k) => put("dev", k, devLabels.get(k) || k, g, st)); } else unk("dev", "", "Unknown", g, st);
+    if (g.tagKeys.length) { dims.tag.known++; g.tagKeys.forEach((k) => put("tag", k, tagLabels.get(k) || k, g, st)); } else unk("tag", "", "Unknown", g, st);
     if (g.deck) { dims.deck.known++; put("deck", g.deck, STAT_LABELS.deck[g.deck], g, st); } else unk("deck", 0, STAT_LABELS.deck[0], g, st);
     const tier = g.proton && TIERS.includes(g.proton.tier) ? g.proton.tier : null;
     if (tier) { dims.pt.known++; put("pt", tier, STAT_LABELS.pt[tier], g, st); } else unk("pt", "", "Unknown", g, st);
@@ -775,7 +790,7 @@ function statsFor(games, opts) {
   const byCount = (a, b) => b.n - a.n || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0);
   const ordered = (d, order) => order.filter((k) => dims[d].rows.has(k)).map((k) => dims[d].rows.get(k));
   const out = {};
-  for (const d of ["gen", "pub", "dev"]) out[d] = { rows: [...dims[d].rows.values()].sort(byCount) };
+  for (const d of ["gen", "pub", "dev", "tag"]) out[d] = { rows: [...dims[d].rows.values()].sort(byCount) };
   out.deck = { rows: ordered("deck", [3, 2, 1]) };
   out.pt = { rows: ordered("pt", TIERS) };
   out.ctrl = { rows: ordered("ctrl", ["full", "partial", "none"]) };
@@ -854,6 +869,7 @@ const DEFAULT_F = {
   ymin: null, ymax: null, yrUnk: false,
   ctrl: [], ctrlUnk: false,
   pub: [], pubUnk: false, dev: [], devUnk: false,
+  tag: [], tagUnk: false,
   rv: [], rvUnk: false,
   unk: [],
   play: [], lane: [], notes: "",
@@ -895,6 +911,8 @@ function clean(raw) {
   r.pubUnk = o.pubUnk === true;
   r.dev = names(o.dev);
   r.devUnk = o.devUnk === true;
+  r.tag = [...new Set(names(o.tag).map(tagKey).filter(Boolean))];
+  r.tagUnk = o.tagUnk === true;
   r.rv = pickIn(o.rv, REVIEW_KEYS);
   r.rvUnk = o.rvUnk === true;
   r.unk = pickIn(o.unk, UNK_KEYS);
@@ -967,7 +985,7 @@ function activeCount() {
     f.q.trim() !== "", f.deck.length > 0, f.gen.length > 0,
     f.dnone || f.dmin !== null || f.dmax !== null, f.pt.length > 0,
     f.mc !== null || f.mcmax !== null, f.ymin !== null || f.ymax !== null, f.ctrl.length > 0,
-    f.pub.length > 0, f.dev.length > 0, f.rv.length > 0, f.unk.length > 0,
+    f.pub.length > 0, f.dev.length > 0, f.tag.length > 0, f.rv.length > 0, f.unk.length > 0,
     f.play.length > 0, f.lane.length > 0, f.notes !== "",
   ].filter(Boolean).length;
 }
@@ -1011,7 +1029,7 @@ function sampleGames() {
     deck, hltb: h ? { main: h[0], extra: h[1], complete: h[2] } : null,
     genres, metacritic: mc, year, controller: null,
     proton: SAMPLE_PROTON[appid] ? { tier: SAMPLE_PROTON[appid][0], total: SAMPLE_PROTON[appid][1] } : null,
-    hasProton: true, hasDetails: true,
+    hasProton: true, hasDetails: true, tags: [],
     publishers: SAMPLE_META[appid] ? SAMPLE_META[appid][0].split(", ") : [],
     developers: SAMPLE_META[appid] ? SAMPLE_META[appid][1].split(", ") : [],
     reviews: SAMPLE_META[appid] ? { total: SAMPLE_META[appid][2], pct: SAMPLE_META[appid][3], desc: SAMPLE_META[appid][4] } : null,
@@ -1140,6 +1158,8 @@ function setLibrary(games, source, meta) {
   games.forEach(annotateNames);
   S.pubGroups = nameGroups(games, "pub");
   S.devGroups = nameGroups(games, "dev");
+  S.tagGroups = nameGroups(games, "tag");
+  S.tagLabels = new Map([...S.tagGroups].map(([k, e]) => [k, e.label]));
   S.pubLabels = new Map([...S.pubGroups].map(([k, e]) => [k, e.label]));
   S.devLabels = new Map([...S.devGroups].map(([k, e]) => [k, e.label]));
   S.games = games;
@@ -1280,6 +1300,10 @@ function passes(g) {
     if (!g.devKeys.length) { if (!f.devUnk) return false; }
     else if (!g.devKeys.some((k) => f.dev.includes(k))) return false;
   }
+  if (f.tag.length) {
+    if (!g.tagKeys.length) { if (!f.tagUnk) return false; }
+    else if (!g.tagKeys.some((k) => f.tag.includes(k))) return false;
+  }
   if (f.rv.length) {
     const b = reviewBucket(g);
     if (b === null) { if (!f.rvUnk) return false; }
@@ -1354,7 +1378,7 @@ function unkHtml(key) {
 }
 // "Only unknown" (the f.unk list): show just the games with no data for a dimension. Turning it on clears that
 // dimension's own values, since a game can't be both known and unknown.
-const UNK_FIELDS = { gen: ["gen", "genUnk"], pub: ["pub", "pubUnk"], dev: ["dev", "devUnk"], pt: ["pt", "ptUnk"],
+const UNK_FIELDS = { gen: ["gen", "genUnk"], pub: ["pub", "pubUnk"], dev: ["dev", "devUnk"], tag: ["tag", "tagUnk"], pt: ["pt", "ptUnk"],
                      mc: ["mc", "mcmax", "mcUnk"], yr: ["ymin", "ymax", "yrUnk"], ctrl: ["ctrl", "ctrlUnk"], rv: ["rv", "rvUnk"] };
 function onlyUnkHtml(dim) {
   return `<label class="unk"><input type="checkbox" data-fu="${dim}" ${S.f.unk.includes(dim) ? "checked" : ""}> Only unknown</label>`;
@@ -1365,11 +1389,13 @@ function fgroup(title, body, unk, dim) {
 }
 // Publisher / developer picker: a search box, the chosen values, and the best matches. Many hundreds of values, so
 // the list is searched, not shown whole.
+const pickGroups = (field) => (field === "pub" ? S.pubGroups : field === "dev" ? S.devGroups : S.tagGroups);
 function pickerOptions(field) {
-  const groups = field === "pub" ? S.pubGroups : S.devGroups;
+  const groups = pickGroups(field);
   const q = S.pickQ[field].trim().toLowerCase();
   const chosen = new Set(S.f[field]);
-  let list = [...groups.values()].filter((e) => !chosen.has(e.key) && (!q || e.label.toLowerCase().includes(q) || e.key.includes(q)));
+  const qk = field === "tag" ? tagKey(q) : q;  // "souls like" and "soulsborne" find Souls-like
+  let list = [...groups.values()].filter((e) => !chosen.has(e.key) && (!q || e.label.toLowerCase().includes(q) || (qk && e.key.includes(qk))));
   list.sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
   const shown = list.slice(0, 30);
   if (!shown.length) return `<p class="fhint">${groups.size ? "No match." : "No data yet. Re-export with --details."}</p>`;
@@ -1377,7 +1403,7 @@ function pickerOptions(field) {
     (list.length > shown.length ? `<p class="fhint">${(list.length - shown.length).toLocaleString()} more. Type to narrow the list.</p>` : "");
 }
 function pickerHtml(field, noun) {
-  const groups = field === "pub" ? S.pubGroups : S.devGroups;
+  const groups = pickGroups(field);
   const chosen = S.f[field].map((k) => `<button type="button" data-fa="${field}" data-fv="${esc(k)}" aria-pressed="true" aria-label="Remove ${esc(groups.has(k) ? groups.get(k).label : k)}">${esc(groups.has(k) ? groups.get(k).label : k)} ✕</button>`).join("");
   return `${chosen ? `<div class="seg">${chosen}</div>` : ""}
     <input type="search" data-ps="${field}" placeholder="Search ${noun}s" value="${esc(S.pickQ[field])}" autocomplete="off" aria-label="Search ${noun}s">
@@ -1412,6 +1438,7 @@ function renderPanel() {
      <label>At most<select data-fs="mcmax"><option value="">Any</option>${MC_MAX_OPTS.map((v) => `<option value="${v}" ${f.mcmax === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>`, "mcUnk", "mc"));
   parts.push(fgroup("Steam user reviews",
     segHtml("rv", REVIEW_LEVELS) + (S.games.some((g) => g.reviews) ? "" : `<p class="fhint">No review data yet. Re-export with --details.</p>`), "rvUnk", "rv"));
+  parts.push(fgroup("Tags", pickerHtml("tag", "tag"), "tagUnk", "tag"));
   parts.push(fgroup("Publisher", pickerHtml("pub", "publisher"), "pubUnk", "pub"));
   parts.push(fgroup("Developer", pickerHtml("dev", "developer"), "devUnk", "dev"));
   parts.push(fgroup("Release year",
@@ -1483,6 +1510,7 @@ const STAT_CARDS = [
   { d: "gen", title: "Genre", noun: "Genre", rank: true },
   { d: "pub", title: "Publisher", noun: "Publisher", rank: true, search: true },
   { d: "dev", title: "Developer", noun: "Developer", rank: true, search: true },
+  { d: "tag", title: "Tags", plural: "tags", noun: "Tags", rank: true, search: true },
   { d: "deck", title: "Steam Deck rating", noun: "Deck rating" },
   { d: "pt", title: "ProtonDB tier", noun: "ProtonDB tier" },
   { d: "ctrl", title: "Controller support", noun: "Controller support" },
@@ -1517,7 +1545,8 @@ function cardRowsHtml(c) {
   let rows = dim.rows, other = null, q = "";
   if (c.rank) {
     q = c.search ? S.statQ[c.d].trim().toLowerCase() : "";
-    if (q) rows = rows.filter((r) => r.label.toLowerCase().includes(q));
+    const qk = c.d === "tag" ? tagKey(q) : "";
+    if (q) rows = rows.filter((r) => r.label.toLowerCase().includes(q) || (qk && r.key.includes(qk)));
     rows = rankRows(rows, S.metric);
     if (!q && !S.statShow[c.d]) ({ rows, other } = foldRows(rows, STAT_TOP));
     if (q) rows = rows.slice(0, 100);
@@ -1566,7 +1595,7 @@ function renderStats() {
   $("listH").textContent = "Statistics";
   const rows = selected();
   const t0 = performance.now();
-  S.stats = statsFor(rows, { dsrc: S.f.dsrc, laneOf: lane, pubLabels: S.pubLabels, devLabels: S.devLabels });
+  S.stats = statsFor(rows, { dsrc: S.f.dsrc, laneOf: lane, pubLabels: S.pubLabels, devLabels: S.devLabels, tagLabels: S.tagLabels });
   S.lastStatsMs = performance.now() - t0;
   window.__statsMs = S.lastStatsMs;
   const t = S.stats.tiles, n = rows.length, nf = (x) => x.toLocaleString();
@@ -1576,7 +1605,7 @@ function renderStats() {
   $("countLine").textContent = `${nf(n)} ${n === 1 ? "game" : "games"} in this view` + (filters ? ` · ${filters} filter${filters === 1 ? "" : "s"} on` : "");
   $("metricSeg").innerHTML = STAT_METRICS.map((m) => `<button type="button" data-metric="${m}" aria-pressed="${S.metric === m}">${METRIC_LABELS[m]}</button>`).join("");
   $("statNote").textContent = "The thin strip under each bar splits those games into never launched, tried (under 2 h) and played (2 h or more). " +
-    "A game with several genres, publishers or developers counts under each. Click a row to see its games in the list.";
+    "A game with several genres, publishers, developers or tags counts under each (tags are Steam's top 10 user tags for the game). Click a row to see its games in the list.";
   if (!n) {
     $("statTiles").innerHTML = "";
     $("statCards").innerHTML = `<div class="panel" style="grid-column:1/-1"><p>No games match these filters.</p></div>`;
@@ -1597,7 +1626,8 @@ function renderStats() {
   $("statCards").innerHTML = STAT_CARDS.map((c) => {
     const dim = S.stats.dims[c.d];
     const cov = c.d === "lane" ? `Triaged: ${nf(dim.known)} of ${nf(dim.total)}` : `${c.noun} known for ${nf(dim.known)} of ${nf(dim.total)}`;
-    const search = c.search ? `<input type="search" data-sq="${c.d}" placeholder="Search ${c.title.toLowerCase()}s" value="${esc(S.statQ[c.d])}" autocomplete="off" aria-label="Search ${c.title.toLowerCase()}s">` : "";
+    const plural = c.plural || c.title.toLowerCase() + "s";
+    const search = c.search ? `<input type="search" data-sq="${c.d}" placeholder="Search ${plural}" value="${esc(S.statQ[c.d])}" autocomplete="off" aria-label="Search ${plural}">` : "";
     const yearTools = c.d === "year"
       ? `<span class="seg" role="group" aria-label="Group years">${[[1, "By year"], [10, "By decade"]].map(([v, l]) => `<button type="button" data-ystep="${v}" aria-pressed="${S.yearStep === v}">${l}</button>`).join("")}</span>` : "";
     return `<section class="scard${c.wide ? " wide" : ""}" aria-label="${esc(c.title)}">
@@ -1611,7 +1641,7 @@ function renderStats() {
 // A stats row, turned into the filter state that lists exactly its games. The statistics already describe the
 // filtered set, so a row's own value replaces the old values of its dimension (genre: it is added, and "all of
 // these" is switched on, so the list is still inside the set).
-const UNK_DIM = { gen: "gen", pub: "pub", dev: "dev", pt: "pt", ctrl: "ctrl", mc: "mc", rv: "rv", year: "yr" };
+const UNK_DIM = { gen: "gen", pub: "pub", dev: "dev", tag: "tag", pt: "pt", ctrl: "ctrl", mc: "mc", rv: "rv", year: "yr" };
 function rowFilter(dim, key, unknown, step) {
   const f = clean(S.f);
   const noUnk = (d) => { f.unk = f.unk.filter((x) => x !== d); };
@@ -1628,6 +1658,7 @@ function rowFilter(dim, key, unknown, step) {
       f.genUnk = false; noUnk("gen"); break;
     case "pub": f.pub = [key]; f.pubUnk = false; noUnk("pub"); break;
     case "dev": f.dev = [key]; f.devUnk = false; noUnk("dev"); break;
+    case "tag": f.tag = [key]; f.tagUnk = false; noUnk("tag"); break;
     case "deck": f.deck = [Number(key)]; break;
     case "pt": f.pt = [key]; f.ptUnk = false; noUnk("pt"); break;
     case "ctrl": f.ctrl = [key]; f.ctrlUnk = false; noUnk("ctrl"); break;
