@@ -174,6 +174,18 @@ def name_key(raw: Any) -> str:
     return " ".join(t)
 
 
+# A few names people use for a Steam tag, mapped onto that tag's key (the page's TAG_ALIASES).
+TAG_ALIASES = {"soulsborne": "soulslike", "soulsbourne": "soulslike"}
+
+
+def tag_key(raw: Any) -> str:
+    """The page's tagKey(): NFKC, lower case, letters and digits only, then the alias table. "Souls-like",
+    "souls like" and "Soulslike" share a key, and so does "Soulsborne"."""
+    text = unicodedata.normalize("NFKC", "" if raw is None else str(raw)).lower()
+    k = "".join(c for c in text if unicodedata.category(c)[0] in "LN")
+    return TAG_ALIASES.get(k, k)
+
+
 # --------------------------------------------------------------------------- games
 @dataclass(frozen=True)
 class Hltb:
@@ -222,7 +234,8 @@ class Game:
     pub_keys: tuple[str, ...] = ()
     dev_keys: tuple[str, ...] = ()
     reviews: Reviews | None = None
-    tags: tuple[str, ...] = ()  # Steam store tags, exact display names, Steam's vote order
+    tags: tuple[str, ...] = ()  # Steam store tags as Steam spells them, in vote order
+    tag_keys: tuple[str, ...] = ()  # tag_key() of each, deduplicated
 
 
 def _names(v: Any) -> tuple[str, ...]:
@@ -232,8 +245,12 @@ def _names(v: Any) -> tuple[str, ...]:
     return tuple(x.strip() for x in v if isinstance(x, str) and x.strip())[:10]
 
 
+def _keys_by(key_fn: Callable[[Any], str], names: Sequence[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(k for k in map(key_fn, names) if k))
+
+
 def _keys(names: Sequence[str]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(k for k in map(name_key, names) if k))
+    return _keys_by(name_key, names)
 
 
 def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
@@ -264,6 +281,7 @@ def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
     elif isinstance(r, list):  # a JS array is an object too: no usable fields
         reviews = Reviews(0.0, None, None)
     publishers, developers = _names(raw.get("publishers")), _names(raw.get("developers"))
+    tags = _names(raw.get("tags"))
     return Game(
         appid=int(appid) if isinstance(appid, int | float) and not isinstance(appid, bool) else 0,
         name=str(name) if name else f"App {appid}",
@@ -283,7 +301,7 @@ def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
         publishers=publishers, developers=developers,
         pub_keys=_keys(publishers), dev_keys=_keys(developers),
         reviews=reviews,
-        tags=_names(raw.get("tags")),
+        tags=tags, tag_keys=_keys_by(tag_key, tags),
     )
 
 
@@ -351,7 +369,7 @@ def is_unknown(g: Game, k: str) -> bool:
     if k == "dev":
         return not g.dev_keys
     if k == "tag":
-        return not g.tags
+        return not g.tag_keys
     if k == "pt":
         return not (g.proton and g.proton.tier)
     if k == "mc":
@@ -443,7 +461,7 @@ class Filters:
     publishers_unknown: bool = False
     developers: tuple[str, ...] = ()
     developers_unknown: bool = False
-    tags: tuple[str, ...] = ()  # exact Steam tag names
+    tags: tuple[str, ...] = ()  # normalized keys (tag_key)
     tags_unknown: bool = False
     reviews: tuple[str, ...] = ()
     reviews_unknown: bool = False
@@ -562,7 +580,7 @@ def clean(raw: Mapping[str, Any]) -> Filters:
         publishers_unknown=o.get("pubUnk") is True,
         developers=_names_in(o.get("dev")),
         developers_unknown=o.get("devUnk") is True,
-        tags=_names_in(o.get("tag")),
+        tags=_keys_by(tag_key, _names_in(o.get("tag"))),
         tags_unknown=o.get("tagUnk") is True,
         reviews=tuple(_pick_in(o.get("rv"), REVIEW_KEYS)),
         reviews_unknown=o.get("rvUnk") is True,
@@ -624,10 +642,10 @@ def passes(g: Game, f: Filters, triage: Mapping[int, str], notes: Mapping[int, s
         elif not any(k in f.developers for k in g.dev_keys):
             return False
     if f.tags:
-        if not g.tags:
+        if not g.tag_keys:
             if not f.tags_unknown:
                 return False
-        elif not any(t in f.tags for t in g.tags):
+        elif not any(k in f.tags for k in g.tag_keys):
             return False
     if f.reviews:
         b = review_bucket(g)
@@ -859,9 +877,10 @@ def name_groups(games: Iterable[Game], field_: str) -> dict[str, dict[str, Any]]
     """key -> {key, label, n}: n counts games once each; label is the most common spelling (ties: A to Z)."""
     groups: dict[str, dict[str, Any]] = {}
     for g in games:
-        raws, keys = (g.publishers, g.pub_keys) if field_ == "pub" else (g.developers, g.dev_keys)
+        raws, keys, key_fn = {"pub": (g.publishers, g.pub_keys, name_key), "dev": (g.developers, g.dev_keys, name_key),
+                              "tag": (g.tags, g.tag_keys, tag_key)}[field_]
         for raw in raws:
-            key = name_key(raw)
+            key = key_fn(raw)
             if not key:
                 continue
             e = groups.setdefault(key, {"key": key, "label": "", "n": 0, "spell": {}})
@@ -876,7 +895,8 @@ def name_groups(games: Iterable[Game], field_: str) -> dict[str, dict[str, Any]]
 
 
 def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[Game], str] | None = None,
-              pub_labels: Mapping[str, str] | None = None, dev_labels: Mapping[str, str] | None = None) -> dict:
+              pub_labels: Mapping[str, str] | None = None, dev_labels: Mapping[str, str] | None = None,
+              tag_labels: Mapping[str, str] | None = None) -> dict:
     """The page's statsFor(): ``{"tiles": {...}, "dims": {gen, pub, dev, tag, deck, pt, ctrl, len, lane, mc, rv, year}}``
     with the same camelCase keys; json.dumps of it equals JSON.stringify of the page's result."""
     dsrc = dsrc if dsrc in SRCS else "main"
@@ -885,6 +905,8 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
         pub_labels = {k: e["label"] for k, e in name_groups(games, "pub").items()}
     if dev_labels is None:
         dev_labels = {k: e["label"] for k, e in name_groups(games, "dev").items()}
+    if tag_labels is None:
+        tag_labels = {k: e["label"] for k, e in name_groups(games, "tag").items()}
     rows: dict[str, dict[Any, dict[str, Any]]] = {d: {} for d in STAT_DIMS}
     unknown: dict[str, dict[str, Any] | None] = {d: None for d in STAT_DIMS}
     known = {d: 0 for d in STAT_DIMS}
@@ -945,11 +967,10 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
                 put("dev", k, dev_labels.get(k) or k, g, st)
         else:
             unk("dev", "", "Unknown", g, st)
-        tags = list(dict.fromkeys(g.tags))
-        if tags:
+        if g.tag_keys:
             known["tag"] += 1
-            for t in tags:
-                put("tag", t, t, g, st)
+            for k in g.tag_keys:
+                put("tag", k, tag_labels.get(k) or k, g, st)
         else:
             unk("tag", "", "Unknown", g, st)
         if g.deck:
@@ -1176,8 +1197,8 @@ def tool_filters(*, query: str | None = None, genres: Any = None, genre_match: s
         kw["publishers"] = tuple(dict.fromkeys(k for k in map(name_key, _str_list("publishers", publishers, 10, 80)) if k))
     if developers is not None:
         kw["developers"] = tuple(dict.fromkeys(k for k in map(name_key, _str_list("developers", developers, 10, 80)) if k))
-    if tags is not None:  # Steam's display names, matched exactly: no normalizer, no case folding
-        kw["tags"] = tuple(dict.fromkeys(t for t in _str_list("tags", tags, 10, 80) if t))
+    if tags is not None:  # any spelling: matched by tag_key ("soulslike", "Souls-like", "souls like", "soulsborne")
+        kw["tags"] = _keys_by(tag_key, _str_list("tags", tags, 10, 80))
     if reviews is not None:
         kw["reviews"] = _enum_list("reviews", reviews, REVIEW_KEYS)
     if play_state is not None:

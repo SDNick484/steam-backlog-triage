@@ -125,6 +125,10 @@ class Filters(unittest.TestCase):
         self.check("tag=Metroidvania", lambda g: "Metroidvania" in g.get("tags", []))
         self.check("tag=Souls-like&tag=Roguelike", lambda g: {"Souls-like", "Roguelike"} & set(g.get("tags", [])))
 
+    def test_tag_filter_forgives_spelling_and_knows_aliases(self):
+        for spelling in ("Souls-like", "soulslike", "Souls+like", "SOULSBORNE"):
+            self.check("tag=" + spelling, lambda g: "Souls-like" in g.get("tags", []))
+
     def test_tag_filter_with_unknown_included_and_only_unknown(self):
         self.check("tag=Cozy&tagUnk=1", lambda g: not g.get("tags") or "Cozy" in g["tags"])
         self.check("unk=tag", lambda g: not g.get("tags"))

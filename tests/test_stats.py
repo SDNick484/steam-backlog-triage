@@ -158,15 +158,47 @@ class Buckets(unittest.TestCase):
 
     def test_unknown_per_dimension(self):
         g = {"genres": [], "pubKeys": [], "devKeys": [], "proton": None, "metacritic": None, "year": None,
-             "controller": None, "hasDetails": False, "reviews": None, "tags": []}
+             "controller": None, "hasDetails": False, "reviews": None, "tags": [], "tagKeys": []}
         got = node("UNK_KEYS.map((k) => isUnknown(DATA, k))", g)
         self.assertEqual(got, [True] * 9)
         known = {**g, "genres": ["RPG"], "pubKeys": ["a"], "devKeys": ["b"], "proton": {"tier": "gold", "total": 1},
                  "metacritic": 80, "year": 2020, "controller": "full", "reviews": {"total": 1, "pct": 100, "desc": "x"},
-                 "tags": ["Metroidvania"]}
+                 "tags": ["Metroidvania"], "tagKeys": ["metroidvania"]}
         self.assertEqual(node("UNK_KEYS.map((k) => isUnknown(DATA, k))", known), [False] * 9)
         # "None listed" controller support is a known value once the export had store details.
         self.assertFalse(node("isUnknown(DATA, 'ctrl')", {**g, "hasDetails": True}))
+
+
+TAG_KEY_CASES = ["Soulslike", "Souls-like", "souls like", "SOULS-LIKE", "Soulsborne", "soulsbourne", "Metroidvania",
+                 "Roguelike", "Rogue-like", "Roguelite", "2.5D", "Co-op", "co op", "  Pixel   Graphics ", "Sci-fi",
+                 "Ｓｏｕｌｓ‐ｌｉｋｅ", "Café", "", "+", "constructor", "__proto__"]
+TAG_KEY_WANT = ["soulslike", "soulslike", "soulslike", "soulslike", "soulslike", "soulslike", "metroidvania",
+                "roguelike", "roguelike", "roguelite", "25d", "coop", "coop", "pixelgraphics", "scifi",
+                "soulslike", "café", "", "", "constructor", "proto"]
+
+
+class TagKeys(unittest.TestCase):
+    def test_spellings_share_a_key_and_aliases_map_onto_it(self):
+        self.assertEqual(node("DATA.map(tagKey)", TAG_KEY_CASES), TAG_KEY_WANT)
+        self.assertEqual(node("[null, undefined, 5].map(tagKey)"), ["", "", "5"])
+
+    def test_distinct_tags_stay_distinct(self):
+        self.assertNotEqual(node("tagKey('Roguelike')"), node("tagKey('Roguelite')"))
+        self.assertNotEqual(node("tagKey('Action RPG')"), node("tagKey('RPG')"))
+
+    def test_annotate_names_adds_deduplicated_tag_keys(self):
+        g = node("annotateNames({tags: ['Souls-like', 'Soulslike', '+', 'Metroidvania']})")
+        self.assertEqual(g["tagKeys"], ["soulslike", "metroidvania"])
+        self.assertEqual(node("annotateNames({}).tagKeys"), [])
+        self.assertEqual(node("annotateNames({tags: 'x'}).tags"), [])
+
+    def test_groups_count_a_game_once_and_label_with_the_commonest_spelling(self):
+        games = [{"tags": ["Souls-like", "Soulslike"]}, {"tags": ["Souls-like"]}, {"tags": ["Soulslike"]},
+                 {"tags": ["Souls-like", "Metroidvania"]}, {"tags": []}]
+        groups = node("[...nameGroups(DATA.map(annotateNames), 'tag').values()]", games)
+        by = {e["key"]: e for e in groups}
+        self.assertEqual(by["soulslike"], {"key": "soulslike", "label": "Souls-like", "n": 4})
+        self.assertEqual(by["metroidvania"]["n"], 1)
 
 
 # ---------------------------------------------------------------- statsFor, checked against the fixture
@@ -180,6 +212,12 @@ def pkey(name):
         toks.pop()
         toks[-1] = re.sub(r"^\W+|\W+$", "", toks[-1])
     return " ".join(toks)
+
+
+def tkey(name):
+    """A plain Python version of tagKey for the fixture's ASCII tag names."""
+    k = re.sub(r"[^a-z0-9]+", "", name.lower())
+    return {"soulsborne": "soulslike", "soulsbourne": "soulslike"}.get(k, k)
 
 
 def pstate(g):
@@ -213,7 +251,7 @@ class StatsFor(unittest.TestCase):
 
     def test_genre_publisher_developer_and_tag_rows(self):
         for d, field, key in (("gen", "genres", lambda x: x), ("pub", "publishers", pkey), ("dev", "developers", pkey),
-                              ("tag", "tags", lambda x: x)):
+                              ("tag", "tags", tkey)):
             want, unknown = {}, 0
             for g in self.games:
                 ks = {key(v) for v in g.get(field, []) if key(v)}
@@ -232,19 +270,19 @@ class StatsFor(unittest.TestCase):
             self.assertEqual(dim["unknown"]["n"] if dim["unknown"] else 0, unknown, d)
             self.assertEqual(dim["known"] + unknown, 40, d)
 
-    def test_tags_are_exact_names_ranked_by_games_with_a_muted_unknown_row(self):
+    def test_tags_are_keyed_ranked_by_games_with_a_muted_unknown_row(self):
         dim = self.stats["dims"]["tag"]
         none = sum(1 for g in self.games if not g.get("tags"))
         self.assertGreater(none, 0)
         self.assertEqual(dim["unknown"]["n"], none)
         self.assertEqual(dim["known"], 40 - none)
         by = {r["key"]: r for r in dim["rows"]}
-        self.assertIn("Souls-like", by)
-        self.assertNotIn("souls-like", by, "no case folding")
-        self.assertEqual(by["Metroidvania"]["label"], "Metroidvania")
+        self.assertIn("soulslike", by, "rows are keyed by the normalized tag, labelled with Steam's spelling")
+        self.assertEqual(by["soulslike"]["label"], "Souls-like")
+        self.assertEqual(by["metroidvania"]["label"], "Metroidvania")
         counts = [r["n"] for r in dim["rows"]]
         self.assertEqual(counts, sorted(counts, reverse=True))
-        self.assertGreater(by["Metroidvania"]["n"], 1, "some games share a tag")
+        self.assertGreater(by["metroidvania"]["n"], 1, "some games share a tag")
 
     def test_every_dimension_rows_plus_unknown_cover_the_games(self):
         for d, dim in self.stats["dims"].items():

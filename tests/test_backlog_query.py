@@ -338,7 +338,7 @@ STATES = [
     {"view": "all", "dev": ["studio alpha"]}, {"view": "all", "dev": ["studio beta"], "devUnk": True},
     {"view": "all", "tag": ["Metroidvania"]}, {"view": "all", "tag": ["Souls-like", "Roguelike"]},
     {"view": "all", "tag": ["Cozy"], "tagUnk": True}, {"view": "all", "unk": ["tag"]},
-    {"view": "all", "tag": ["metroidvania"]}, {"view": "all", "tag": ["Metroidvania", "Difficult"], "tagUnk": True, "deck": [3]},
+    {"view": "all", "tag": ["metroidvania"]}, {"view": "all", "tag": ["Souls like"]}, {"view": "all", "tag": ["Soulsborne"]}, {"view": "all", "tag": ["Metroidvania", "Difficult"], "tagUnk": True, "deck": [3]},
     {"view": "backlog", "tag": ["Souls-like"], "dsrc": "main", "dmax": 30},
     {"view": "all", "tag": [""] + ["Pixel Graphics"] * 2 + ["x" * 81], "gen": ["RPG"]},
     {"view": "all", "rv": ["mixed", "few"]}, {"view": "all", "rv": ["very-positive"], "rvUnk": True},
@@ -377,17 +377,25 @@ class FilterVectors(unittest.TestCase):
         self.assertGreater(len(sizes), 8)
         self.assertIn(0, sizes | {0})
 
-    def test_tags_are_exact_names_and_blank_is_unknown(self):
+    def test_tag_key_matches_the_page(self):
+        from tests.test_stats import TAG_KEY_CASES, TAG_KEY_WANT
+        self.assertEqual([q.tag_key(x) for x in TAG_KEY_CASES], TAG_KEY_WANT)
+        self.assertEqual([q.tag_key(x) for x in (None, 5)], ["", "5"])
+
+    def test_tags_are_keyed_loosely_and_blank_is_unknown(self):
         self.assertEqual(q.normalize(raw(tags=[" Souls-like ", "", 5, "Metroidvania"] + ["T"] * 12)).tags[:2],
                          ("Souls-like", "Metroidvania"))
         self.assertEqual(len(q.normalize(raw(tags=[f"T{i}" for i in range(30)])).tags), 10)
         self.assertEqual(q.normalize(raw()).tags, ())
         self.assertEqual(q.normalize(raw(tags="Souls-like")).tags, ())
         f = q.clean({"view": "all", "tag": ["Metroidvania", "", "Metroidvania", "x" * 81], "tagUnk": True})
-        self.assertEqual((f.tags, f.tags_unknown), (("Metroidvania",), True))
+        self.assertEqual((f.tags, f.tags_unknown), (("metroidvania",), True))
         by = {g.name: g for g in GAMES}
         self.assertTrue(q.passes(by["Fixture Game 03"], q.clean({"unk": ["tag"]}), TRIAGE, NOTES))
-        self.assertFalse(q.passes(by["Fixture Game 02"], q.clean({"tag": ["metroidvania"]}), TRIAGE, NOTES))
+        self.assertTrue(q.passes(by["Fixture Game 02"], q.clean({"tag": ["metroidvania"]}), TRIAGE, NOTES))
+        self.assertTrue(q.passes(by["Fixture Game 01"], q.clean({"tag": ["Souls like"]}), TRIAGE, NOTES))
+        self.assertTrue(q.passes(by["Fixture Game 01"], q.clean({"tag": ["soulsborne"]}), TRIAGE, NOTES))
+        self.assertFalse(q.passes(by["Fixture Game 02"], q.clean({"tag": ["Roguelite"]}), TRIAGE, NOTES))
         self.assertTrue(q.passes(by["Fixture Game 02"], q.clean({"tag": ["Metroidvania"]}), TRIAGE, NOTES))
         self.assertTrue(q.passes(by["Fixture Game 03"], q.clean({"tag": ["Metroidvania"], "tagUnk": True}), TRIAGE, NOTES))
         self.assertFalse(q.passes(by["Fixture Game 03"], q.clean({"tag": ["Metroidvania"]}), TRIAGE, NOTES))
@@ -476,11 +484,12 @@ class ToolOutputs(unittest.TestCase):
                 q.tool_filters(**bad)
 
     def test_tool_filters_tags_are_exact_names(self):
-        f = q.tool_filters(tags=["Souls-like", "Souls-like", "", "Metroidvania"], include_unknown=["tags"])
-        self.assertEqual((f.tags, f.tags_unknown), (("Souls-like", "Metroidvania"), True))
-        self.assertEqual(q.tool_filters(tags="Roguelike").tags, ("Roguelike",), "one name is a list of one")
+        f = q.tool_filters(tags=["Souls-like", "soulslike", "", "Metroidvania"], include_unknown=["tags"])
+        self.assertEqual((f.tags, f.tags_unknown), (("soulslike", "metroidvania"), True))
+        self.assertEqual(q.tool_filters(tags="Roguelike").tags, ("roguelike",), "one name is a list of one")
         self.assertEqual(q.tool_filters(unknown_only=["tags"]).unknown_only, ("tag",))
-        self.assertEqual(q.tool_filters(tags=["metroidvania"]).tags, ("metroidvania",), "no case folding")
+        for spelling in ("Soulslike", "souls-like", "souls like", "SOULSLIKE", "Soulsborne"):
+            self.assertEqual(q.tool_filters(tags=[spelling]).tags, ("soulslike",), spelling)
         for bad in ({"tags": ["x"] * 11}, {"tags": ["x" * 81]}, {"tags": [5]}, {"tags": {"a": 1}}):
             with self.subTest(bad=bad), self.assertRaises(q.QueryError):
                 q.tool_filters(**bad)
@@ -488,6 +497,7 @@ class ToolOutputs(unittest.TestCase):
     def test_find_games_by_tag_matches_the_page_filter(self):
         for state, kw in (({"view": "all", "tag": ["Metroidvania"]}, {"tags": ["Metroidvania"]}),
                           ({"view": "all", "tag": ["Souls-like", "Roguelike"]}, {"tags": ["Souls-like", "Roguelike"]}),
+                          ({"view": "all", "tag": ["Souls like"]}, {"tags": ["Soulsborne"]}),
                           ({"view": "all", "unk": ["tag"]}, {"unknown_only": ["tags"]}),
                           ({"view": "all", "tag": ["Cozy"], "tagUnk": True}, {"tags": ["Cozy"], "include_unknown": ["tags"]})):
             with self.subTest(state=state):

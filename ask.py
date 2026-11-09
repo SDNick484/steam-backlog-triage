@@ -266,8 +266,8 @@ FILTER_PROPS = {
     "controller": _enum_list(bq.CTRLS, "Controller support."),
     "publishers": _names(10, "Publisher names."),
     "developers": _names(10, "Developer names."),
-    "tags": _names(10, "Steam store tags (players' own labels), exact spelling, e.g. Metroidvania, Souls-like, "
-                       "Roguelike. Matches any of them."),
+    "tags": _names(10, "Steam store tags (players' own labels), e.g. Metroidvania, Souls-like, Roguelike. Spelling "
+                       "and case are forgiving (soulslike, souls like, soulsborne). Matches any of them."),
     "reviews": _enum_list(bq.REVIEW_KEYS, "Steam user review levels."),
     "play_state": _enum_list(bq.PLAYS, "never = 0 min, tried = under 2 h, played = 2 h or more."),
     "lane": _enum_list(("next", "someday", "skip", "done", "none"), "Triage lanes; none = untriaged."),
@@ -334,8 +334,9 @@ controller support, plus their own triage. Answer from the tools only.
   Explain picks from score_breakdown.
 - Missing data (no HLTB time, Unknown Deck rating) means unknown, never zero or bad. Don't invent lengths or
   ratings.
-- Tags (Soulslike, Metroidvania, Roguelike...) are Steam's user-applied store tags, the top 10 per game, matched by
-  exact name (Steam spells it Souls-like). They may be missing for a game; that means unknown, not "no tags".
+- Tags (Soulslike, Metroidvania, Roguelike...) are Steam's user-applied store tags, the top 10 per game, matched
+  loosely on spelling (Soulslike finds Souls-like, as does Soulsborne). They may be missing for a game; that means
+  unknown, not "no tags".
 - When a search comes back with exact=false, say which filters were dropped.
 - Answer in one or two sentences; the list carries the detail.
 - Always finish by calling show_results with the app ids of the games you mean, best first.

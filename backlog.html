@@ -572,7 +572,8 @@ const S = {
   devLabels: new Map(),
   pubGroups: new Map(),      // normalized publisher key -> { key, label, n }, for the whole library
   devGroups: new Map(),
-  tagGroups: new Map(),      // tag name -> { key, label, n }, for the whole library
+  tagGroups: new Map(),      // normalized tag key -> { key, label, n }, for the whole library
+  tagLabels: new Map(),
   pickQ: { pub: "", dev: "", tag: "" }, // text typed in the publisher / developer / tag pickers
   metric: "games",           // statistics: games | hours | never
   statShow: { gen: false, pub: false, dev: false, tag: false }, // statistics: "Show all" expanded
@@ -608,22 +609,31 @@ function nameKey(raw) {
   }
   return t.join(" ");
 }
-// Adds pubKeys and devKeys (deduplicated normalized keys, blanks dropped) to a game, and makes sure the raw lists exist.
+// Steam store tags are grouped and matched by a looser key: lower case, letters and digits only, so "Souls-like",
+// "souls like" and "Soulslike" are one tag. TAG_ALIASES maps a few other names people use onto a tag's key.
+const TAG_ALIASES = new Map([["soulsborne", "soulslike"], ["soulsbourne", "soulslike"]]);
+function tagKey(raw) {
+  const k = String(raw === null || raw === undefined ? "" : raw).normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return TAG_ALIASES.get(k) || k;
+}
+// Adds pubKeys, devKeys and tagKeys (deduplicated normalized keys, blanks dropped) to a game, and makes sure the raw lists exist.
 function annotateNames(g) {
   const keys = (list) => [...new Set((list || []).map(nameKey).filter(Boolean))];
   g.publishers = Array.isArray(g.publishers) ? g.publishers : [];
   g.developers = Array.isArray(g.developers) ? g.developers : [];
   g.pubKeys = keys(g.publishers);
   g.devKeys = keys(g.developers);
+  g.tags = Array.isArray(g.tags) ? g.tags : [];
+  g.tagKeys = [...new Set(g.tags.map(tagKey).filter(Boolean))];
   return g;
 }
 // key -> { key, label, n }: n counts games (once each), label is the most common original spelling (ties: A to Z).
 function nameGroups(games, field) {
-  const keysOf = field === "pub" ? "pubKeys" : "devKeys", listOf = field === "pub" ? "publishers" : "developers";
+  const [keysOf, listOf, keyOf] = { pub: ["pubKeys", "publishers", nameKey], dev: ["devKeys", "developers", nameKey], tag: ["tagKeys", "tags", tagKey] }[field];
   const groups = new Map();
   for (const g of games) {
     for (const raw of g[listOf] || []) {
-      const key = nameKey(raw);
+      const key = keyOf(raw);
       if (!key) continue;
       let e = groups.get(key);
       if (!e) groups.set(key, (e = { key, label: "", n: 0, spell: new Map() }));
@@ -634,17 +644,6 @@ function nameGroups(games, field) {
   for (const e of groups.values()) {
     e.label = [...e.spell.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))[0][0];
     delete e.spell;
-  }
-  return groups;
-}
-
-// Steam store tags are matched by their exact display name, so the "key" of a tag is its name. name -> { key, label, n }:
-// n counts games (once each).
-function tagGroups(games) {
-  const groups = new Map();
-  for (const g of games) for (const t of new Set(g.tags || [])) {
-    const e = groups.get(t);
-    if (e) e.n++; else groups.set(t, { key: t, label: t, n: 1 });
   }
   return groups;
 }
@@ -698,7 +697,7 @@ function isUnknown(g, k) {
     case "gen": return !(g.genres && g.genres.length);
     case "pub": return !(g.pubKeys && g.pubKeys.length);
     case "dev": return !(g.devKeys && g.devKeys.length);
-    case "tag": return !(g.tags && g.tags.length);
+    case "tag": return !(g.tagKeys && g.tagKeys.length);
     case "pt": return !(g.proton && g.proton.tier);
     case "mc": return !g.metacritic;
     case "yr": return !g.year;
@@ -728,7 +727,7 @@ function median(xs) {
   const a = xs.slice().sort((x, y) => x - y), m = a.length >> 1;
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
-// statsFor(games, { dsrc, laneOf, pubLabels, devLabels }) -> plain object. Pure: it never touches the page.
+// statsFor(games, { dsrc, laneOf, pubLabels, devLabels, tagLabels }) -> plain object. Pure: it never touches the page.
 //   tiles: totals for the set. dims.<name> = { rows, unknown, known, total }:
 //   rows are { key, label, n, minutes, never, tried, played } (n games; a game with several genres, publishers or
 //   developers is counted once under each); unknown is the same shape or null; known counts games with a value.
@@ -738,6 +737,7 @@ function statsFor(games, opts) {
   const laneOf = typeof o.laneOf === "function" ? o.laneOf : () => "";
   const pubLabels = o.pubLabels || new Map([...nameGroups(games, "pub")].map(([k, e]) => [k, e.label]));
   const devLabels = o.devLabels || new Map([...nameGroups(games, "dev")].map(([k, e]) => [k, e.label]));
+  const tagLabels = o.tagLabels || new Map([...nameGroups(games, "tag")].map(([k, e]) => [k, e.label]));
   const row = (key, label) => ({ key, label, n: 0, minutes: 0, never: 0, tried: 0, played: 0 });
   const dims = {};
   for (const d of ["gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]) {
@@ -768,8 +768,7 @@ function statsFor(games, opts) {
     if (genres.length) { dims.gen.known++; genres.forEach((x) => put("gen", x, x, g, st)); } else unk("gen", "", "Unknown", g, st);
     if (g.pubKeys.length) { dims.pub.known++; g.pubKeys.forEach((k) => put("pub", k, pubLabels.get(k) || k, g, st)); } else unk("pub", "", "Unknown", g, st);
     if (g.devKeys.length) { dims.dev.known++; g.devKeys.forEach((k) => put("dev", k, devLabels.get(k) || k, g, st)); } else unk("dev", "", "Unknown", g, st);
-    const tags = [...new Set(g.tags || [])];
-    if (tags.length) { dims.tag.known++; tags.forEach((t) => put("tag", t, t, g, st)); } else unk("tag", "", "Unknown", g, st);
+    if (g.tagKeys.length) { dims.tag.known++; g.tagKeys.forEach((k) => put("tag", k, tagLabels.get(k) || k, g, st)); } else unk("tag", "", "Unknown", g, st);
     if (g.deck) { dims.deck.known++; put("deck", g.deck, STAT_LABELS.deck[g.deck], g, st); } else unk("deck", 0, STAT_LABELS.deck[0], g, st);
     const tier = g.proton && TIERS.includes(g.proton.tier) ? g.proton.tier : null;
     if (tier) { dims.pt.known++; put("pt", tier, STAT_LABELS.pt[tier], g, st); } else unk("pt", "", "Unknown", g, st);
@@ -912,7 +911,7 @@ function clean(raw) {
   r.pubUnk = o.pubUnk === true;
   r.dev = names(o.dev);
   r.devUnk = o.devUnk === true;
-  r.tag = names(o.tag);
+  r.tag = [...new Set(names(o.tag).map(tagKey).filter(Boolean))];
   r.tagUnk = o.tagUnk === true;
   r.rv = pickIn(o.rv, REVIEW_KEYS);
   r.rvUnk = o.rvUnk === true;
@@ -1159,7 +1158,8 @@ function setLibrary(games, source, meta) {
   games.forEach(annotateNames);
   S.pubGroups = nameGroups(games, "pub");
   S.devGroups = nameGroups(games, "dev");
-  S.tagGroups = tagGroups(games);
+  S.tagGroups = nameGroups(games, "tag");
+  S.tagLabels = new Map([...S.tagGroups].map(([k, e]) => [k, e.label]));
   S.pubLabels = new Map([...S.pubGroups].map(([k, e]) => [k, e.label]));
   S.devLabels = new Map([...S.devGroups].map(([k, e]) => [k, e.label]));
   S.games = games;
@@ -1301,8 +1301,8 @@ function passes(g) {
     else if (!g.devKeys.some((k) => f.dev.includes(k))) return false;
   }
   if (f.tag.length) {
-    if (!g.tags.length) { if (!f.tagUnk) return false; }
-    else if (!g.tags.some((t) => f.tag.includes(t))) return false;
+    if (!g.tagKeys.length) { if (!f.tagUnk) return false; }
+    else if (!g.tagKeys.some((k) => f.tag.includes(k))) return false;
   }
   if (f.rv.length) {
     const b = reviewBucket(g);
@@ -1394,7 +1394,8 @@ function pickerOptions(field) {
   const groups = pickGroups(field);
   const q = S.pickQ[field].trim().toLowerCase();
   const chosen = new Set(S.f[field]);
-  let list = [...groups.values()].filter((e) => !chosen.has(e.key) && (!q || e.label.toLowerCase().includes(q) || e.key.includes(q)));
+  const qk = field === "tag" ? tagKey(q) : q;  // "souls like" and "soulsborne" find Souls-like
+  let list = [...groups.values()].filter((e) => !chosen.has(e.key) && (!q || e.label.toLowerCase().includes(q) || (qk && e.key.includes(qk))));
   list.sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
   const shown = list.slice(0, 30);
   if (!shown.length) return `<p class="fhint">${groups.size ? "No match." : "No data yet. Re-export with --details."}</p>`;
@@ -1544,7 +1545,8 @@ function cardRowsHtml(c) {
   let rows = dim.rows, other = null, q = "";
   if (c.rank) {
     q = c.search ? S.statQ[c.d].trim().toLowerCase() : "";
-    if (q) rows = rows.filter((r) => r.label.toLowerCase().includes(q));
+    const qk = c.d === "tag" ? tagKey(q) : "";
+    if (q) rows = rows.filter((r) => r.label.toLowerCase().includes(q) || (qk && r.key.includes(qk)));
     rows = rankRows(rows, S.metric);
     if (!q && !S.statShow[c.d]) ({ rows, other } = foldRows(rows, STAT_TOP));
     if (q) rows = rows.slice(0, 100);
@@ -1593,7 +1595,7 @@ function renderStats() {
   $("listH").textContent = "Statistics";
   const rows = selected();
   const t0 = performance.now();
-  S.stats = statsFor(rows, { dsrc: S.f.dsrc, laneOf: lane, pubLabels: S.pubLabels, devLabels: S.devLabels });
+  S.stats = statsFor(rows, { dsrc: S.f.dsrc, laneOf: lane, pubLabels: S.pubLabels, devLabels: S.devLabels, tagLabels: S.tagLabels });
   S.lastStatsMs = performance.now() - t0;
   window.__statsMs = S.lastStatsMs;
   const t = S.stats.tiles, n = rows.length, nf = (x) => x.toLocaleString();
