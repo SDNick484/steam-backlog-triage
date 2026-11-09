@@ -840,7 +840,7 @@ STAT_LABELS: dict[str, dict[Any, str]] = {
 }
 LEN_ORDER = ("short", "mid", "long", "epic")
 LANE_ORDER = ("next", "someday", "skip", "done")
-STAT_DIMS = ("gen", "pub", "dev", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year")
+STAT_DIMS = ("gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year")
 
 
 def _stat_row(key: Any, label: str) -> dict[str, Any]:
@@ -877,7 +877,7 @@ def name_groups(games: Iterable[Game], field_: str) -> dict[str, dict[str, Any]]
 
 def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[Game], str] | None = None,
               pub_labels: Mapping[str, str] | None = None, dev_labels: Mapping[str, str] | None = None) -> dict:
-    """The page's statsFor(): ``{"tiles": {...}, "dims": {gen, pub, dev, deck, pt, ctrl, len, lane, mc, rv, year}}``
+    """The page's statsFor(): ``{"tiles": {...}, "dims": {gen, pub, dev, tag, deck, pt, ctrl, len, lane, mc, rv, year}}``
     with the same camelCase keys; json.dumps of it equals JSON.stringify of the page's result."""
     dsrc = dsrc if dsrc in SRCS else "main"
     lane_fn = lane_of if callable(lane_of) else (lambda _g: "")
@@ -945,6 +945,13 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
                 put("dev", k, dev_labels.get(k) or k, g, st)
         else:
             unk("dev", "", "Unknown", g, st)
+        tags = list(dict.fromkeys(g.tags))
+        if tags:
+            known["tag"] += 1
+            for t in tags:
+                put("tag", t, t, g, st)
+        else:
+            unk("tag", "", "Unknown", g, st)
         if g.deck:
             known["deck"] += 1
             put("deck", g.deck, STAT_LABELS["deck"][g.deck], g, st)
@@ -1001,7 +1008,7 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
         return [rows[d][k] for k in order if k in rows[d]]
 
     out: dict[str, dict[str, Any]] = {}
-    for d in ("gen", "pub", "dev"):
+    for d in ("gen", "pub", "dev", "tag"):
         out[d] = {"rows": sorted(rows[d].values(), key=lambda r: (-r["n"], _u16(r["label"])))}
     out["deck"] = {"rows": ordered("deck", (3, 2, 1))}
     out["pt"] = {"rows": ordered("pt", TIERS)}

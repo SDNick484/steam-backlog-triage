@@ -211,8 +211,9 @@ class StatsFor(unittest.TestCase):
         self.assertEqual(t["mcCount"], len(mcs))
         self.assertAlmostEqual(t["mcMedian"], mcs[mid] if len(mcs) % 2 else (mcs[mid - 1] + mcs[mid]) / 2)
 
-    def test_genre_publisher_and_developer_rows(self):
-        for d, field, key in (("gen", "genres", lambda x: x), ("pub", "publishers", pkey), ("dev", "developers", pkey)):
+    def test_genre_publisher_developer_and_tag_rows(self):
+        for d, field, key in (("gen", "genres", lambda x: x), ("pub", "publishers", pkey), ("dev", "developers", pkey),
+                              ("tag", "tags", lambda x: x)):
             want, unknown = {}, 0
             for g in self.games:
                 ks = {key(v) for v in g.get(field, []) if key(v)}
@@ -231,11 +232,25 @@ class StatsFor(unittest.TestCase):
             self.assertEqual(dim["unknown"]["n"] if dim["unknown"] else 0, unknown, d)
             self.assertEqual(dim["known"] + unknown, 40, d)
 
+    def test_tags_are_exact_names_ranked_by_games_with_a_muted_unknown_row(self):
+        dim = self.stats["dims"]["tag"]
+        none = sum(1 for g in self.games if not g.get("tags"))
+        self.assertGreater(none, 0)
+        self.assertEqual(dim["unknown"]["n"], none)
+        self.assertEqual(dim["known"], 40 - none)
+        by = {r["key"]: r for r in dim["rows"]}
+        self.assertIn("Souls-like", by)
+        self.assertNotIn("souls-like", by, "no case folding")
+        self.assertEqual(by["Metroidvania"]["label"], "Metroidvania")
+        counts = [r["n"] for r in dim["rows"]]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+        self.assertGreater(by["Metroidvania"]["n"], 1, "some games share a tag")
+
     def test_every_dimension_rows_plus_unknown_cover_the_games(self):
         for d, dim in self.stats["dims"].items():
             self.assertEqual(dim["total"], 40)
             self.assertEqual(dim["known"] + (dim["unknown"]["n"] if dim["unknown"] else 0), 40, d)
-            if d not in ("gen", "pub", "dev"):   # the multi-value dimensions count a game under each value
+            if d not in ("gen", "pub", "dev", "tag"):   # the multi-value dimensions count a game under each value
                 self.assertEqual(sum(r["n"] for r in dim["rows"]), dim["known"], d)
             for r in dim["rows"]:
                 self.assertEqual(r["never"] + r["tried"] + r["played"], r["n"], f"{d} {r['key']}")

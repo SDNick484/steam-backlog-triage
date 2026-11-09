@@ -575,8 +575,8 @@ const S = {
   tagGroups: new Map(),      // tag name -> { key, label, n }, for the whole library
   pickQ: { pub: "", dev: "", tag: "" }, // text typed in the publisher / developer / tag pickers
   metric: "games",           // statistics: games | hours | never
-  statShow: { gen: false, pub: false, dev: false }, // statistics: "Show all" expanded
-  statQ: { pub: "", dev: "" },                      // statistics: text typed in the publisher / developer search
+  statShow: { gen: false, pub: false, dev: false, tag: false }, // statistics: "Show all" expanded
+  statQ: { pub: "", dev: "", tag: "" },             // statistics: text typed in the publisher / developer / tag search
   yearStep: 1,               // statistics: 1 = by year, 10 = by decade
   stats: null,               // the last statsFor() result
   f: null,                   // filter state, set below
@@ -740,7 +740,7 @@ function statsFor(games, opts) {
   const devLabels = o.devLabels || new Map([...nameGroups(games, "dev")].map(([k, e]) => [k, e.label]));
   const row = (key, label) => ({ key, label, n: 0, minutes: 0, never: 0, tried: 0, played: 0 });
   const dims = {};
-  for (const d of ["gen", "pub", "dev", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]) {
+  for (const d of ["gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]) {
     dims[d] = { rows: new Map(), unknown: null, known: 0, total: games.length };
   }
   const bump = (r, g, st) => { r.n++; r.minutes += g.playtime; r[st]++; };
@@ -768,6 +768,8 @@ function statsFor(games, opts) {
     if (genres.length) { dims.gen.known++; genres.forEach((x) => put("gen", x, x, g, st)); } else unk("gen", "", "Unknown", g, st);
     if (g.pubKeys.length) { dims.pub.known++; g.pubKeys.forEach((k) => put("pub", k, pubLabels.get(k) || k, g, st)); } else unk("pub", "", "Unknown", g, st);
     if (g.devKeys.length) { dims.dev.known++; g.devKeys.forEach((k) => put("dev", k, devLabels.get(k) || k, g, st)); } else unk("dev", "", "Unknown", g, st);
+    const tags = [...new Set(g.tags || [])];
+    if (tags.length) { dims.tag.known++; tags.forEach((t) => put("tag", t, t, g, st)); } else unk("tag", "", "Unknown", g, st);
     if (g.deck) { dims.deck.known++; put("deck", g.deck, STAT_LABELS.deck[g.deck], g, st); } else unk("deck", 0, STAT_LABELS.deck[0], g, st);
     const tier = g.proton && TIERS.includes(g.proton.tier) ? g.proton.tier : null;
     if (tier) { dims.pt.known++; put("pt", tier, STAT_LABELS.pt[tier], g, st); } else unk("pt", "", "Unknown", g, st);
@@ -789,7 +791,7 @@ function statsFor(games, opts) {
   const byCount = (a, b) => b.n - a.n || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0);
   const ordered = (d, order) => order.filter((k) => dims[d].rows.has(k)).map((k) => dims[d].rows.get(k));
   const out = {};
-  for (const d of ["gen", "pub", "dev"]) out[d] = { rows: [...dims[d].rows.values()].sort(byCount) };
+  for (const d of ["gen", "pub", "dev", "tag"]) out[d] = { rows: [...dims[d].rows.values()].sort(byCount) };
   out.deck = { rows: ordered("deck", [3, 2, 1]) };
   out.pt = { rows: ordered("pt", TIERS) };
   out.ctrl = { rows: ordered("ctrl", ["full", "partial", "none"]) };
@@ -1507,6 +1509,7 @@ const STAT_CARDS = [
   { d: "gen", title: "Genre", noun: "Genre", rank: true },
   { d: "pub", title: "Publisher", noun: "Publisher", rank: true, search: true },
   { d: "dev", title: "Developer", noun: "Developer", rank: true, search: true },
+  { d: "tag", title: "Tags", plural: "tags", noun: "Tags", rank: true, search: true },
   { d: "deck", title: "Steam Deck rating", noun: "Deck rating" },
   { d: "pt", title: "ProtonDB tier", noun: "ProtonDB tier" },
   { d: "ctrl", title: "Controller support", noun: "Controller support" },
@@ -1600,7 +1603,7 @@ function renderStats() {
   $("countLine").textContent = `${nf(n)} ${n === 1 ? "game" : "games"} in this view` + (filters ? ` · ${filters} filter${filters === 1 ? "" : "s"} on` : "");
   $("metricSeg").innerHTML = STAT_METRICS.map((m) => `<button type="button" data-metric="${m}" aria-pressed="${S.metric === m}">${METRIC_LABELS[m]}</button>`).join("");
   $("statNote").textContent = "The thin strip under each bar splits those games into never launched, tried (under 2 h) and played (2 h or more). " +
-    "A game with several genres, publishers or developers counts under each. Click a row to see its games in the list.";
+    "A game with several genres, publishers, developers or tags counts under each (tags are Steam's top 10 user tags for the game). Click a row to see its games in the list.";
   if (!n) {
     $("statTiles").innerHTML = "";
     $("statCards").innerHTML = `<div class="panel" style="grid-column:1/-1"><p>No games match these filters.</p></div>`;
@@ -1621,7 +1624,8 @@ function renderStats() {
   $("statCards").innerHTML = STAT_CARDS.map((c) => {
     const dim = S.stats.dims[c.d];
     const cov = c.d === "lane" ? `Triaged: ${nf(dim.known)} of ${nf(dim.total)}` : `${c.noun} known for ${nf(dim.known)} of ${nf(dim.total)}`;
-    const search = c.search ? `<input type="search" data-sq="${c.d}" placeholder="Search ${c.title.toLowerCase()}s" value="${esc(S.statQ[c.d])}" autocomplete="off" aria-label="Search ${c.title.toLowerCase()}s">` : "";
+    const plural = c.plural || c.title.toLowerCase() + "s";
+    const search = c.search ? `<input type="search" data-sq="${c.d}" placeholder="Search ${plural}" value="${esc(S.statQ[c.d])}" autocomplete="off" aria-label="Search ${plural}">` : "";
     const yearTools = c.d === "year"
       ? `<span class="seg" role="group" aria-label="Group years">${[[1, "By year"], [10, "By decade"]].map(([v, l]) => `<button type="button" data-ystep="${v}" aria-pressed="${S.yearStep === v}">${l}</button>`).join("")}</span>` : "";
     return `<section class="scard${c.wide ? " wide" : ""}" aria-label="${esc(c.title)}">
@@ -1635,7 +1639,7 @@ function renderStats() {
 // A stats row, turned into the filter state that lists exactly its games. The statistics already describe the
 // filtered set, so a row's own value replaces the old values of its dimension (genre: it is added, and "all of
 // these" is switched on, so the list is still inside the set).
-const UNK_DIM = { gen: "gen", pub: "pub", dev: "dev", pt: "pt", ctrl: "ctrl", mc: "mc", rv: "rv", year: "yr" };
+const UNK_DIM = { gen: "gen", pub: "pub", dev: "dev", tag: "tag", pt: "pt", ctrl: "ctrl", mc: "mc", rv: "rv", year: "yr" };
 function rowFilter(dim, key, unknown, step) {
   const f = clean(S.f);
   const noUnk = (d) => { f.unk = f.unk.filter((x) => x !== d); };
@@ -1652,6 +1656,7 @@ function rowFilter(dim, key, unknown, step) {
       f.genUnk = false; noUnk("gen"); break;
     case "pub": f.pub = [key]; f.pubUnk = false; noUnk("pub"); break;
     case "dev": f.dev = [key]; f.devUnk = false; noUnk("dev"); break;
+    case "tag": f.tag = [key]; f.tagUnk = false; noUnk("tag"); break;
     case "deck": f.deck = [Number(key)]; break;
     case "pt": f.pt = [key]; f.ptUnk = false; noUnk("pt"); break;
     case "ctrl": f.ctrl = [key]; f.ctrlUnk = false; noUnk("ctrl"); break;

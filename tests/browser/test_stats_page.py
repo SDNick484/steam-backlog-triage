@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover
 
 REQUIRE = os.environ.get("REQUIRE_BROWSER") == "1"
 LIB = json.loads((HERE.parent / "fixtures" / "stats_library.json").read_text(encoding="utf-8"))
-CARDS = ["gen", "pub", "dev", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]
+CARDS = ["gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]
 
 
 def synthetic_library(n: int) -> dict:
@@ -130,7 +130,7 @@ class StatsPage(unittest.TestCase):
     def test_unknown_rows_are_clickable(self):
         self.serve()
         seen = 0
-        for card in ("pub", "dev", "rv", "mc", "year"):
+        for card in ("pub", "dev", "tag", "rv", "mc", "year"):
             page = self.open("/stats", "view=all")
             el = page.query_selector(f"#srows-{card} [data-su]")
             if not el:
@@ -157,13 +157,29 @@ class StatsPage(unittest.TestCase):
     def test_old_export_shows_coverage_notes(self):
         lib = json.loads(json.dumps(LIB))
         for g in lib["games"]:
-            for k in ("publishers", "developers", "reviews"):
+            for k in ("publishers", "developers", "reviews", "tags"):
                 g.pop(k, None)
         self.serve(lib)
         page = self.open("/stats", "view=all")
         text = page.inner_text("#statCards")
         self.assertRegex(text, r"Publisher known for 0 of 40")
         self.assertRegex(text, r"Steam reviews known for 0 of 40")
+        self.assertRegex(text, r"Tags known for 0 of 40")
+        self.assertEqual(self.problems, [])
+
+    def test_a_tag_row_and_the_tag_filter_give_the_same_count(self):
+        """Metroidvania from the Stats row and from the filter hash (what the list's picker sets) list the same games."""
+        self.serve()
+        want = sum(1 for g in LIB["games"] if "Metroidvania" in g.get("tags", []))
+        page = self.open("/stats", "view=all")
+        row = page.query_selector('#srows-tag [data-sd="tag"][data-sk="Metroidvania"]')
+        self.assertIsNotNone(row, "Metroidvania should be among the top tag rows")
+        self.assertEqual(int(row.get_attribute("data-n")), want)
+        row.click()
+        self.assertEqual(self.list_count(page, want), want)
+        self.assertIn("tag=Metroidvania", page.url)
+        page = self.open("/", "view=all&tag=Metroidvania")
+        self.assertEqual(self.list_count(page, want), want)
         self.assertEqual(self.problems, [])
 
     def test_themes_and_mobile(self):
@@ -186,6 +202,11 @@ class StatsPage(unittest.TestCase):
         page.click("[data-csv=gen]")
         csv = page.evaluate("navigator.clipboard.readText()")
         self.assertTrue(csv.splitlines()[0].lower().startswith("value"), csv[:60])
+        page.click("[data-csv=tag]")
+        csv = page.evaluate("navigator.clipboard.readText()")
+        self.assertTrue(csv.splitlines()[0].lower().startswith("value"), csv[:60])
+        self.assertIn("Metroidvania,", csv)
+        self.assertTrue(csv.splitlines()[-1].startswith("Unknown,"))
         self.assertEqual(self.problems, [])
 
     def test_five_thousand_games_in_under_50_ms(self):
