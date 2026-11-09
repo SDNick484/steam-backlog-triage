@@ -22,11 +22,11 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from _support import MockSteam, fake_steamid, run_exporter  # noqa: E402
+from _support import DEFAULT_TAG_NAMES, MockSteam, fake_steamid, run_exporter  # noqa: E402
 import steam_backlog_export as exporter  # noqa: E402
 
 GAME_KEYS = {"appid", "name", "playtime", "deckPlaytime", "lastPlayed", "deck", "hltb", "genres", "metacritic",
-             "year", "controller", "publishers", "developers", "reviews", "proton"}
+             "year", "controller", "publishers", "developers", "reviews", "tags", "proton"}
 FAKE_KEY = "FAKEKEY0123456789"
 
 
@@ -183,10 +183,10 @@ class Cache(ExporterCase):
         self.assertEqual(len(self.library()["games"]), 5)
 
     def test_cache_file_has_all_kinds(self):
-        """The cache holds deck, hltb, details, proton and reviews sections (CACHE_KINDS)."""
+        """The cache holds deck, hltb, details, proton, reviews, tags and taglist sections (CACHE_KINDS)."""
         self.ok()
         cache = json.loads((self.dir / "steam_backlog_cache.json").read_text())
-        self.assertEqual(set(cache), {"deck", "hltb", "details", "proton", "reviews"})
+        self.assertEqual(set(cache), {"deck", "hltb", "details", "proton", "reviews", "tags", "taglist"})
         self.assertEqual(set(cache["deck"]), {"2001", "2002", "2003", "2004"})
         self.assertEqual(set(cache["deck"]["2001"]), {"t", "v"})
 
@@ -577,3 +577,207 @@ class BadInput(ExporterCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def items_payload(*items):
+    return {"response": {"store_items": list(items)}}
+
+
+def item(appid, tagids=None, success=1):
+    d = {"item_type": 0, "id": appid, "success": success, "appid": appid if success == 1 else 0}
+    if tagids is not None:
+        d["tagids"] = tagids
+        d["tags"] = [{"tagid": t, "weight": 10} for t in tagids]
+    return d
+
+
+class FetchTags(unittest.TestCase):
+    """fetch_tags and fetch_taglist against canned JSON (no network)."""
+
+    def tags(self, payload, appids=(7, 8)):
+        with mock.patch.object(exporter, "http_json", return_value=payload) as m:
+            return exporter.fetch_tags(list(appids), exporter.RateLimiter(0)), m
+
+    def test_ids_are_kept_in_steams_order(self):
+        got, _ = self.tags(items_payload(item(7, [29482, 4026, 122]), item(8, [19])))
+        self.assertEqual(got, {7: [29482, 4026, 122], 8: [19]})
+
+    def test_the_request_asks_for_tag_counts_for_every_app(self):
+        _, m = self.tags(items_payload())
+        url = m.call_args[0][0]
+        self.assertIn("/IStoreBrowseService/GetItems/v1?input_json=", url)
+        import urllib.parse
+        req = json.loads(urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["input_json"][0])
+        self.assertEqual([i["appid"] for i in req["ids"]], [7, 8])
+        self.assertTrue(req["data_request"]["include_tag_count"])
+
+    def test_more_than_tags_max_ids_are_cut_in_order(self):
+        ids = list(range(100, 100 + exporter.TAGS_MAX + 7))
+        got, _ = self.tags(items_payload(item(7, ids)), appids=(7,))
+        self.assertEqual(got[7], ids[:exporter.TAGS_MAX])
+        self.assertEqual(len(got[7]), 10)
+
+    def test_an_app_the_store_does_not_know_is_an_empty_answer(self):
+        got, _ = self.tags(items_payload(item(7, success=15), item(8, [19])))
+        self.assertEqual(got, {7: [], 8: [19]})
+
+    def test_an_app_absent_from_the_response_is_left_out_so_it_is_not_cached(self):
+        got, _ = self.tags(items_payload(item(8, [19])))
+        self.assertEqual(got, {8: [19]})
+
+    def test_an_item_nobody_asked_for_is_ignored(self):
+        got, _ = self.tags(items_payload(item(99, [19]), item(8, [19])))
+        self.assertEqual(got, {8: [19]})
+
+    def test_a_failed_call_or_wrong_shape_is_none(self):
+        for payload in (None, [], {}, {"response": {}}, {"response": {"store_items": "x"}}):
+            self.assertIsNone(self.tags(payload)[0], payload)
+
+    def test_malformed_tag_ids_are_dropped(self):
+        got, _ = self.tags(items_payload(item(7, [19, "x", None, True, 122]), item(8)))
+        self.assertEqual(got, {7: [19, 122], 8: []})
+
+    def test_taglist_maps_ids_to_names(self):
+        with mock.patch.object(exporter, "http_json", return_value={"response": {"tags": [
+                {"tagid": 1628, "name": "Metroidvania"}, {"tagid": 29482, "name": " Souls-like "},
+                {"tagid": "x", "name": "Bad"}, {"tagid": 5, "name": ""}]}}):
+            self.assertEqual(exporter.fetch_taglist(exporter.RateLimiter(0)), {"1628": "Metroidvania", "29482": "Souls-like"})
+
+    def test_an_empty_or_failed_taglist_is_none(self):
+        for payload in (None, {"response": {"tags": []}}, {"response": {}}):
+            with mock.patch.object(exporter, "http_json", return_value=payload):
+                self.assertIsNone(exporter.fetch_taglist(exporter.RateLimiter(0)))
+
+    def test_a_tag_id_without_a_name_is_dropped_not_written_as_a_number(self):
+        self.assertEqual(exporter.tag_names({"v": [29482, 99999, 1628]}, {"29482": "Souls-like", "1628": "Metroidvania"}),
+                         ["Souls-like", "Metroidvania"])
+        self.assertEqual(exporter.tag_names(None, {"1": "x"}), [])
+
+
+class StoreTags(ExporterCase):
+    def cache(self):
+        return json.loads((self.dir / "steam_backlog_cache.json").read_text())
+
+    def test_tags_are_off_without_details(self):
+        self.ok()
+        self.assertEqual((self.mock.count("tags"), self.mock.count("taglist")), (0, 0))
+        self.assertTrue(all(g["tags"] == [] for g in self.library()["games"]))
+
+    def test_tags_land_in_the_record_by_name_in_steams_order(self):
+        self.mock.tags[2002] = [1628, 3959, 3871]
+        self.mock.tags[2003] = []
+        p, _ = self.ok("--details")
+        self.assertRegex(p.stderr, r"Store tags: fetching 4 games in 1 batches")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["tags"], ["Metroidvania", "Roguelite", "2D"])
+        self.assertEqual(by[2003]["tags"], [])
+        self.assertEqual(by[2001]["tags"], ["Souls-like", "Difficult", "RPG"])
+
+    def test_the_batch_fetch_is_one_call_and_the_taglist_is_fetched_once(self):
+        self.ok("--details")
+        self.assertEqual(self.mock.tag_batches, [[2001, 2002, 2003, 2004]])
+        self.assertEqual((self.mock.count("tags"), self.mock.count("taglist")), (1, 1))
+        self.assertEqual(self.cache()["taglist"]["all"]["v"], {str(k): v for k, v in DEFAULT_TAG_NAMES.items()})
+        self.assertEqual(set(self.cache()["tags"]), {"2001", "2002", "2003", "2004"})
+        self.assertEqual(self.cache()["tags"]["2001"]["v"], [29482, 4026, 122], "ids are cached, names resolved at export")
+
+    def test_batches_are_tags_batch_apps_each(self):
+        with mock.patch.object(exporter, "TAGS_BATCH", 3):
+            todo = [1, 2, 3, 4, 5, 6, 7]
+            cache = exporter.Cache(str(self.dir / "c.json"), False)
+            calls = []
+            with mock.patch.object(exporter, "fetch_taglist", return_value={"19": "Action"}), \
+                    mock.patch.object(exporter, "fetch_tags", side_effect=lambda ids, lim: calls.append(ids) or {a: [19] for a in ids}):
+                exporter.update_tags(todo, cache, exporter.RateLimiter(0))
+        self.assertEqual(calls, [[1, 2, 3], [4, 5, 6], [7]])
+
+    def test_a_second_run_is_all_cache_hits(self):
+        self.ok("--details")
+        p, _ = self.ok("--details")
+        self.assertRegex(p.stderr, r"Store tags: everything cached")
+        self.assertEqual((self.mock.count("tags"), self.mock.count("taglist")), (1, 1))
+
+    def test_a_game_added_later_is_the_only_one_fetched(self):
+        self.ok("--details", "--limit", "2")
+        self.ok("--details")
+        self.assertEqual(self.mock.tag_batches, [[2001, 2002], [2003, 2004]])
+        self.assertEqual(self.mock.count("taglist"), 1)
+
+    def test_expired_tags_are_fetched_again_but_a_fresh_taglist_is_not(self):
+        self.ok("--details")
+        cache = self.cache()
+        for e in cache["tags"].values():
+            e["t"] -= (exporter.TTL_TAGS + 1) * 86400
+        (self.dir / "steam_backlog_cache.json").write_text(json.dumps(cache))
+        self.ok("--details")
+        self.assertEqual(self.mock.count("tags"), 2)
+        self.assertEqual(self.mock.count("taglist"), 1)
+
+    def test_a_stale_taglist_is_fetched_again(self):
+        self.ok("--details")
+        cache = self.cache()
+        cache["taglist"]["all"]["t"] -= (exporter.TTL_TAGLIST + 1) * 86400
+        (self.dir / "steam_backlog_cache.json").write_text(json.dumps(cache))
+        self.mock.taglist = [(200, {"response": {"tags": [{"tagid": 29482, "name": "Soulslike"}]}}, {})]
+        self.ok("--details")
+        self.assertEqual(self.mock.count("taglist"), 2)
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2001]["tags"], ["Soulslike"], "ids the new list lacks are dropped")
+
+    def test_a_stale_taglist_is_used_when_the_refresh_fails(self):
+        self.ok("--details")
+        cache = self.cache()
+        cache["taglist"]["all"]["t"] -= (exporter.TTL_TAGLIST + 1) * 86400
+        (self.dir / "steam_backlog_cache.json").write_text(json.dumps(cache))
+        self.mock.taglist = [(404, b"", {})]
+        p, _ = self.ok("--details")
+        self.assertRegex(p.stderr, r"couldn't fetch the tag list; using the older copy")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2001]["tags"], ["Souls-like", "Difficult", "RPG"])
+
+    def test_no_taglist_at_all_leaves_tags_empty_but_the_export_finishes(self):
+        self.mock.taglist = [(404, b"", {})]
+        p, _ = self.ok("--details")
+        self.assertRegex(p.stderr, r"tags stay empty this run")
+        self.assertTrue(all(g["tags"] == [] for g in self.library()["games"]))
+        self.assertEqual(set(self.cache()["tags"]), {"2001", "2002", "2003", "2004"}, "ids are still cached")
+
+    def test_an_id_missing_from_the_taglist_is_dropped(self):
+        self.mock.tags[2002] = [1628, 99999, 3871]
+        self.ok("--details")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["tags"], ["Metroidvania", "2D"])
+
+    def test_more_than_tags_max_ids_keep_the_first_ten(self):
+        ids = list(DEFAULT_TAG_NAMES)  # 12 real ids
+        self.mock.tags[2002] = ids
+        self.ok("--details")
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual(by[2002]["tags"], [DEFAULT_TAG_NAMES[i] for i in ids[:10]])
+
+    def test_an_app_absent_from_the_response_is_not_cached_and_is_asked_again(self):
+        self.mock.tags_omit = {2003}
+        self.ok("--details")
+        self.assertNotIn("2003", self.cache()["tags"])
+        self.assertEqual({g["appid"]: g for g in self.library()["games"]}[2003]["tags"], [])
+        self.mock.tags_omit = set()
+        self.ok("--details")
+        self.assertEqual(self.mock.tag_batches[-1], [2003])
+        self.assertEqual({g["appid"]: g for g in self.library()["games"]}[2003]["tags"], ["Souls-like", "Difficult", "RPG"])
+
+    def test_a_failed_batch_warns_is_not_cached_and_does_not_abort(self):
+        """60 games are two batches (50 + 10): the first fails, the second lands, the export finishes."""
+        ids = list(range(3000, 3060))
+        self.mock.games = [{"appid": a, "name": f"Game {a}", "playtime_forever": 0} for a in ids]
+        self.mock.tags_batch = [(404, b"", {}), (200, items_payload(*[item(a, [19]) for a in ids[50:]]), {})]
+        p, _ = self.ok("--details")
+        self.assertRegex(p.stderr, r"fetching 60 games in 2 batches")
+        self.assertRegex(p.stderr, r"warning: tag batch 1/2 failed")
+        self.assertEqual(set(self.cache()["tags"]), {str(a) for a in ids[50:]})
+        by = {g["appid"]: g for g in self.library()["games"]}
+        self.assertEqual((by[3000]["tags"], by[3059]["tags"]), ([], ["Action"]))
+        self.assertEqual(self.mock.count("reviews:"), 60, "later steps still run")
+        self.mock.tags_batch = []
+        self.ok("--details")
+        self.assertEqual(self.mock.tag_batches[-1], ids[:50], "only the failed batch is asked again")
+        self.assertEqual({g["appid"]: g for g in self.library()["games"]}[3000]["tags"], ["Souls-like", "Difficult", "RPG"])
