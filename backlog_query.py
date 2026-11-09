@@ -1122,11 +1122,11 @@ def _str_list(name: str, v: Any, max_items: int, max_len: int) -> list[str]:
     return list(items)
 
 
-_UNK_TOOL = {"genres": "gen", "publishers": "pub", "developers": "dev", "protondb": "pt", "metacritic": "mc",
+_UNK_TOOL = {"genres": "gen", "publishers": "pub", "developers": "dev", "tags": "tag", "protondb": "pt", "metacritic": "mc",
              "year": "yr", "controller": "ctrl", "reviews": "rv"}
 _INCLUDE_FLAG = {"genres": "genres_unknown", "length": "length_unknown", "protondb": "protondb_unknown",
                  "metacritic": "metacritic_unknown", "year": "year_unknown", "controller": "controller_unknown",
-                 "publishers": "publishers_unknown", "developers": "developers_unknown",
+                 "publishers": "publishers_unknown", "developers": "developers_unknown", "tags": "tags_unknown",
                  "reviews": "reviews_unknown"}
 
 
@@ -1135,7 +1135,7 @@ def tool_filters(*, query: str | None = None, genres: Any = None, genre_match: s
                  hours_max: float | None = None, deck: Any = None, protondb: Any = None,
                  protondb_min: str | None = None, metacritic_min: Any = None, metacritic_max: Any = None,
                  year_from: Any = None, year_to: Any = None, controller: Any = None, publishers: Any = None,
-                 developers: Any = None, reviews: Any = None, play_state: Any = None, lane: Any = None,
+                 developers: Any = None, tags: Any = None, reviews: Any = None, play_state: Any = None, lane: Any = None,
                  has_note: bool | None = None, include_unknown: Any = None, unknown_only: Any = None) -> Filters:
     """Tool-shaped arguments (spec 7.5 names and enums) -> Filters. A bad value raises QueryError."""
     kw: dict[str, Any] = {}
@@ -1176,6 +1176,8 @@ def tool_filters(*, query: str | None = None, genres: Any = None, genre_match: s
         kw["publishers"] = tuple(dict.fromkeys(k for k in map(name_key, _str_list("publishers", publishers, 10, 80)) if k))
     if developers is not None:
         kw["developers"] = tuple(dict.fromkeys(k for k in map(name_key, _str_list("developers", developers, 10, 80)) if k))
+    if tags is not None:  # Steam's display names, matched exactly: no normalizer, no case folding
+        kw["tags"] = tuple(dict.fromkeys(t for t in _str_list("tags", tags, 10, 80) if t))
     if reviews is not None:
         kw["reviews"] = _enum_list("reviews", reviews, REVIEW_KEYS)
     if play_state is not None:
@@ -1230,6 +1232,7 @@ def _detail(g: Game, snap: Snapshot) -> dict[str, Any]:
         "hltb": {"main": g.hltb.main, "extra": g.hltb.extra, "complete": g.hltb.complete} if g.hltb else None,
         "protondb_reports": int(g.proton.total) if g.proton else None,
         "genres": list(g.genres), "publishers": list(g.publishers), "developers": list(g.developers),
+        "tags": list(g.tags),
         "reviews": {"desc": g.reviews.desc, "pct": g.reviews.pct, "total": g.reviews.total} if g.reviews else None,
         "controller": controller,
         "note": snap.notes.get(g.appid),
@@ -1320,7 +1323,7 @@ def next_queue_out(snap: Snapshot) -> dict[str, Any]:
             "detail": f"{len(q)} games in Up next, in queue order."}
 
 
-_STAT_DIM = {"genre": "gen", "publisher": "pub", "developer": "dev", "deck": "deck", "protondb": "pt",
+_STAT_DIM = {"genre": "gen", "publisher": "pub", "developer": "dev", "tags": "tag", "deck": "deck", "protondb": "pt",
              "controller": "ctrl", "length": "len", "lane": "lane", "metacritic": "mc", "reviews": "rv",
              "year": "year", "decade": "year"}
 
@@ -1341,7 +1344,7 @@ def stats_out(snap: Snapshot, filters: Filters, *, dimension: str, metric: str =
     dim = st["dims"][d]
     rows: list[dict[str, Any]] = dim["rows"]
     other: dict[str, Any] | None
-    if d in ("gen", "pub", "dev"):
+    if d in ("gen", "pub", "dev", "tag"):
         rows, other = fold_rows(rank_rows(rows, metric), 25)
     elif dimension == "decade":
         rows, other = fold_rows(year_buckets(rows, 10), 25)

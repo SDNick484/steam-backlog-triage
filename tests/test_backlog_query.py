@@ -475,6 +475,36 @@ class ToolOutputs(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(q.QueryError):
                 q.tool_filters(**bad)
 
+    def test_tool_filters_tags_are_exact_names(self):
+        f = q.tool_filters(tags=["Souls-like", "Souls-like", "", "Metroidvania"], include_unknown=["tags"])
+        self.assertEqual((f.tags, f.tags_unknown), (("Souls-like", "Metroidvania"), True))
+        self.assertEqual(q.tool_filters(tags="Roguelike").tags, ("Roguelike",), "one name is a list of one")
+        self.assertEqual(q.tool_filters(unknown_only=["tags"]).unknown_only, ("tag",))
+        self.assertEqual(q.tool_filters(tags=["metroidvania"]).tags, ("metroidvania",), "no case folding")
+        for bad in ({"tags": ["x"] * 11}, {"tags": ["x" * 81]}, {"tags": [5]}, {"tags": {"a": 1}}):
+            with self.subTest(bad=bad), self.assertRaises(q.QueryError):
+                q.tool_filters(**bad)
+
+    def test_find_games_by_tag_matches_the_page_filter(self):
+        for state, kw in (({"view": "all", "tag": ["Metroidvania"]}, {"tags": ["Metroidvania"]}),
+                          ({"view": "all", "tag": ["Souls-like", "Roguelike"]}, {"tags": ["Souls-like", "Roguelike"]}),
+                          ({"view": "all", "unk": ["tag"]}, {"unknown_only": ["tags"]}),
+                          ({"view": "all", "tag": ["Cozy"], "tagUnk": True}, {"tags": ["Cozy"], "include_unknown": ["tags"]})):
+            with self.subTest(state=state):
+                want = [g.appid for g in q.selected(GAMES, q.clean(state), TRIAGE, NOTES)]
+                out = q.find_out(SNAP, q.tool_filters(**kw), view="all", limit=25, sort="name")
+                self.assertTrue(out["exact"])
+                self.assertEqual(out["matches"], len(want))
+                self.assertEqual(sorted(g["appid"] for g in out["games"]), sorted(want))
+        self.assertEqual({g["appid"] for g in q.find_out(SNAP, q.tool_filters(tags=["Metroidvania"]), view="all",
+                                                         limit=25)["games"]},
+                         {g.appid for g in GAMES if "Metroidvania" in g.tags})
+
+    def test_game_out_lists_tags_in_steams_order(self):
+        by = {g.name: g for g in GAMES}
+        self.assertEqual(q.game_out(SNAP, game="910001")["game"]["tags"], list(by["Fixture Game 02"].tags))
+        self.assertEqual(q.game_out(SNAP, game="910002")["game"]["tags"], [])
+
     def test_find_out_truncates(self):
         out = q.find_out(SNAP, q.tool_filters(), limit=2)
         self.assertEqual(out["matches"], len(GAMES))
@@ -554,6 +584,20 @@ class ToolOutputs(unittest.TestCase):
         self.assertEqual(out["rows"][0]["label"], "Devolver Digital")
         self.assertEqual(set(out["rows"][0]), {"label", "games", "hours_played", "never", "tried", "played"})
         self.assertIsNotNone(out["unknown"])
+
+    def test_stats_out_tags_rank_fold_and_unknown(self):
+        out = q.stats_out(SNAP, q.tool_filters(), dimension="tags")
+        none = sum(1 for g in GAMES if not g.tags)
+        self.assertEqual(out["dimension"], "tags")
+        self.assertEqual((out["known"], out["unknown"]["games"]), (40 - none, none))
+        self.assertEqual(set(out["rows"][0]), {"label", "games", "hours_played", "never", "tried", "played"})
+        self.assertEqual(out["rows"][0]["games"], max(r["games"] for r in out["rows"]))
+        self.assertIn("Metroidvania", {r["label"] for r in out["rows"]})
+        many = [q.normalize(raw(appid=i, name=f"G{i}", tags=[f"Tag {i}"]), i) for i in range(60)]
+        out = q.stats_out(q.Snapshot(many), q.tool_filters(), dimension="tags")
+        self.assertEqual((len(out["rows"]), out["other"]["games"], out["other"]["values"]), (25, 35, 35))
+        filtered = q.stats_out(SNAP, q.tool_filters(tags=["Metroidvania"]), dimension="tags")
+        self.assertEqual(filtered["total"], sum(1 for g in GAMES if "Metroidvania" in g.tags))
 
     def test_stats_out_decade_and_others(self):
         out = q.stats_out(SNAP, q.tool_filters(), dimension="decade")
