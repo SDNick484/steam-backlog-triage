@@ -140,7 +140,8 @@ class Filters(unittest.TestCase):
         counts = Counter(t for g in GAMES for t in set(g.get("tags", [])))
         self.assertEqual(len(buttons), min(30, len(counts)))
         top, n = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
-        self.assertEqual(buttons[0].inner_text().split(), top.split() + [str(n)])
+        # text_content, not inner_text: the filter panel is collapsed, and inner_text of a hidden element is empty
+        self.assertEqual(buttons[0].text_content().split(), top.split() + [str(n)])
         self.assertEqual(self.problems, [])
 
     def test_only_unknown_works_for_every_dimension(self):
