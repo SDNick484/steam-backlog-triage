@@ -158,12 +158,13 @@ class Buckets(unittest.TestCase):
 
     def test_unknown_per_dimension(self):
         g = {"genres": [], "pubKeys": [], "devKeys": [], "proton": None, "metacritic": None, "year": None,
-             "controller": None, "hasDetails": False, "reviews": None}
+             "controller": None, "hasDetails": False, "reviews": None, "tags": []}
         got = node("UNK_KEYS.map((k) => isUnknown(DATA, k))", g)
-        self.assertEqual(got, [True] * 8)
+        self.assertEqual(got, [True] * 9)
         known = {**g, "genres": ["RPG"], "pubKeys": ["a"], "devKeys": ["b"], "proton": {"tier": "gold", "total": 1},
-                 "metacritic": 80, "year": 2020, "controller": "full", "reviews": {"total": 1, "pct": 100, "desc": "x"}}
-        self.assertEqual(node("UNK_KEYS.map((k) => isUnknown(DATA, k))", known), [False] * 8)
+                 "metacritic": 80, "year": 2020, "controller": "full", "reviews": {"total": 1, "pct": 100, "desc": "x"},
+                 "tags": ["Metroidvania"]}
+        self.assertEqual(node("UNK_KEYS.map((k) => isUnknown(DATA, k))", known), [False] * 9)
         # "None listed" controller support is a known value once the export had store details.
         self.assertFalse(node("isUnknown(DATA, 'ctrl')", {**g, "hasDetails": True}))
 

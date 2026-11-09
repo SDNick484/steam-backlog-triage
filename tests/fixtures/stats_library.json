@@ -21,7 +21,14 @@
    "metacritic": 45,
    "year": 2019,
    "controller": null,
-   "proton": null
+   "proton": null,
+   "tags": [
+    "Souls-like",
+    "Difficult",
+    "Dark Fantasy",
+    "Action RPG",
+    "Open World"
+   ]
   },
   {
    "appid": 910001,
@@ -42,7 +49,15 @@
    "proton": {
     "tier": "bronze",
     "total": 710
-   }
+   },
+   "tags": [
+    "Metroidvania",
+    "2D",
+    "Pixel Graphics",
+    "Atmospheric",
+    "Platformer",
+    "Singleplayer"
+   ]
   },
   {
    "appid": 910002,
@@ -66,7 +81,8 @@
    "proton": {
     "tier": "gold",
     "total": 114
-   }
+   },
+   "tags": []
   },
   {
    "appid": 910003,
@@ -86,7 +102,13 @@
    "proton": {
     "tier": "borked",
     "total": 395
-   }
+   },
+   "tags": [
+    "Roguelike",
+    "Roguelite",
+    "Deckbuilding",
+    "Card Game"
+   ]
   },
   {
    "appid": 910004,
@@ -105,7 +127,13 @@
    "proton": {
     "tier": "native",
     "total": 689
-   }
+   },
+   "tags": [
+    "Story Rich",
+    "Atmospheric",
+    "Adventure",
+    "Singleplayer"
+   ]
   },
   {
    "appid": 910005,
@@ -129,7 +157,13 @@
    "proton": {
     "tier": "gold",
     "total": 238
-   }
+   },
+   "tags": [
+    "Metroidvania",
+    "Souls-like",
+    "2D",
+    "Difficult"
+   ]
   },
   {
    "appid": 910006,
@@ -162,7 +196,8 @@
     "total": 40000,
     "pct": 95,
     "desc": "Mostly Negative"
-   }
+   },
+   "tags": []
   },
   {
    "appid": 910007,
@@ -191,7 +226,13 @@
     "total": 7,
     "pct": 67,
     "desc": "7 user reviews"
-   }
+   },
+   "tags": [
+    "Cozy",
+    "Relaxing",
+    "Simulation",
+    "Singleplayer"
+   ]
   },
   {
    "appid": 910008,
@@ -221,7 +262,13 @@
     "total": 400,
     "pct": 15,
     "desc": "Overwhelmingly Positive"
-   }
+   },
+   "tags": [
+    "RPG",
+    "Turn-Based Strategy",
+    "Strategy",
+    "Story Rich"
+   ]
   },
   {
    "appid": 910009,
@@ -252,7 +299,12 @@
     "total": 40000,
     "pct": 95,
     "desc": "Mostly Negative"
-   }
+   },
+   "tags": [
+    "Strategy",
+    "Turn-Based Strategy",
+    "Indie"
+   ]
   },
   {
    "appid": 910010,
@@ -286,7 +338,14 @@
     "total": 400,
     "pct": 75,
     "desc": "Overwhelmingly Negative"
-   }
+   },
+   "tags": [
+    "Roguelike",
+    "Action",
+    "2D",
+    "Pixel Graphics",
+    "Difficult"
+   ]
   },
   {
    "appid": 910011,
@@ -310,7 +369,8 @@
     "Kalypso Media Digital"
    ],
    "developers": [],
-   "reviews": null
+   "reviews": null,
+   "tags": []
   },
   {
    "appid": 910012,
@@ -342,7 +402,13 @@
     "total": 40000,
     "pct": 60,
     "desc": "Overwhelmingly Negative"
-   }
+   },
+   "tags": [
+    "Souls-like",
+    "Action",
+    "Difficult",
+    "Atmospheric"
+   ]
   },
   {
    "appid": 910013,
@@ -368,7 +434,13 @@
    "developers": [
     "Valve"
    ],
-   "reviews": null
+   "reviews": null,
+   "tags": [
+    "Puzzle",
+    "Atmospheric",
+    "Singleplayer",
+    "Relaxing"
+   ]
   },
   {
    "appid": 910014,
@@ -391,7 +463,12 @@
     "Studio Gamma",
     "Studio Delta"
    ],
-   "reviews": null
+   "reviews": null,
+   "tags": [
+    "Metroidvania",
+    "Atmospheric",
+    "2D"
+   ]
   },
   {
    "appid": 910015,
@@ -420,7 +497,8 @@
    "developers": [
     "Studio Alpha"
    ],
-   "reviews": null
+   "reviews": null,
+   "tags": []
   },
   {
    "appid": 910016,
@@ -451,7 +529,12 @@
     "total": 400,
     "pct": 45,
     "desc": "Mixed"
-   }
+   },
+   "tags": [
+    "Co-op",
+    "Action",
+    "Adventure"
+   ]
   },
   {
    "appid": 910017,
@@ -487,7 +570,12 @@
     "total": 40000,
     "pct": 60,
     "desc": "Negative"
-   }
+   },
+   "tags": [
+    "Cozy",
+    "Simulation",
+    "Relaxing"
+   ]
   },
   {
    "appid": 910018,
@@ -522,7 +610,13 @@
     "total": 3,
     "pct": 67,
     "desc": "3 user reviews"
-   }
+   },
+   "tags": [
+    "RPG",
+    "Story Rich",
+    "Atmospheric",
+    "Open World"
+   ]
   },
   {
    "appid": 910019,
@@ -556,7 +650,14 @@
     "total": 4000,
     "pct": 60,
     "desc": "Very Negative"
-   }
+   },
+   "tags": [
+    "Metroidvania",
+    "Difficult",
+    "Pixel Graphics",
+    "2D",
+    "Indie"
+   ]
   },
   {
    "appid": 910020,
@@ -587,7 +688,11 @@
     "total": 40000,
     "pct": 95,
     "desc": "Very Positive"
-   }
+   },
+   "tags": [
+    "Puzzle",
+    "Singleplayer"
+   ]
   },
   {
    "appid": 910021,
@@ -612,7 +717,8 @@
    "developers": [
     "Studio Alpha"
    ],
-   "reviews": null
+   "reviews": null,
+   "tags": []
   },
   {
    "appid": 910022,
@@ -640,7 +746,13 @@
     "Studio Gamma",
     "Studio Delta"
    ],
-   "reviews": null
+   "reviews": null,
+   "tags": [
+    "Roguelike",
+    "Deckbuilding",
+    "Card Game",
+    "Strategy"
+   ]
   },
   {
    "appid": 910023,
@@ -671,7 +783,13 @@
     "total": 400,
     "pct": 95,
     "desc": "Overwhelmingly Negative"
-   }
+   },
+   "tags": [
+    "Roguelite",
+    "Action",
+    "Pixel Graphics",
+    "2D"
+   ]
   },
   {
    "appid": 910024,
@@ -705,7 +823,12 @@
     "total": 40000,
     "pct": 30,
     "desc": "Overwhelmingly Negative"
-   }
+   },
+   "tags": [
+    "Souls-like",
+    "Action RPG",
+    "Dark Fantasy"
+   ]
   },
   {
    "appid": 910025,
@@ -737,7 +860,8 @@
     "total": 7,
     "pct": 67,
     "desc": "7 user reviews"
-   }
+   },
+   "tags": []
   },
   {
    "appid": 910026,
@@ -772,7 +896,13 @@
     "total": 40000,
     "pct": 15,
     "desc": "Very Negative"
-   }
+   },
+   "tags": [
+    "Adventure",
+    "Story Rich",
+    "Atmospheric",
+    "Singleplayer"
+   ]
   },
   {
    "appid": 910027,
@@ -803,7 +933,11 @@
    "developers": [
     "Valve"
    ],
-   "reviews": null
+   "reviews": null,
+   "tags": [
+    "Metroidvania",
+    "Souls-like"
+   ]
   },
   {
    "appid": 910028,
@@ -831,7 +965,12 @@
     "total": 400,
     "pct": 45,
     "desc": "Mostly Positive"
-   }
+   },
+   "tags": [
+    "Open World",
+    "RPG",
+    "Adventure"
+   ]
   },
   {
    "appid": 910029,
@@ -864,7 +1003,12 @@
     "total": 40,
     "pct": 95,
     "desc": "Very Positive"
-   }
+   },
+   "tags": [
+    "Co-op",
+    "Simulation",
+    "Cozy"
+   ]
   },
   {
    "appid": 910030,
@@ -894,7 +1038,14 @@
     "total": 40000,
     "pct": 95,
     "desc": "Mixed"
-   }
+   },
+   "tags": [
+    "Indie",
+    "Platformer",
+    "2D",
+    "Pixel Graphics",
+    "Difficult"
+   ]
   },
   {
    "appid": 910031,
@@ -930,7 +1081,8 @@
     "total": 40,
     "pct": 15,
     "desc": "Positive"
-   }
+   },
+   "tags": []
   },
   {
    "appid": 910032,
@@ -967,7 +1119,12 @@
     "total": 400,
     "pct": 85,
     "desc": "Mostly Negative"
-   }
+   },
+   "tags": [
+    "Strategy",
+    "Turn-Based Strategy",
+    "Singleplayer"
+   ]
   },
   {
    "appid": 910033,
@@ -998,7 +1155,13 @@
     "total": 4000,
     "pct": 95,
     "desc": "Overwhelmingly Negative"
-   }
+   },
+   "tags": [
+    "Roguelike",
+    "Action",
+    "Difficult",
+    "Roguelite"
+   ]
   },
   {
    "appid": 910034,
@@ -1026,7 +1189,12 @@
    "developers": [
     "Studio Alpha"
    ],
-   "reviews": null
+   "reviews": null,
+   "tags": [
+    "Puzzle",
+    "Cozy",
+    "Relaxing"
+   ]
   },
   {
    "appid": 910035,
@@ -1053,7 +1221,12 @@
     "total": 400,
     "pct": 45,
     "desc": "Overwhelmingly Positive"
-   }
+   },
+   "tags": [
+    "Metroidvania",
+    "Atmospheric",
+    "Story Rich"
+   ]
   },
   {
    "appid": 910036,
@@ -1081,7 +1254,8 @@
     "total": 40,
     "pct": 60,
     "desc": "Overwhelmingly Positive"
-   }
+   },
+   "tags": []
   },
   {
    "appid": 910037,
@@ -1117,7 +1291,11 @@
     "total": 400,
     "pct": 75,
     "desc": "Positive"
-   }
+   },
+   "tags": [
+    "Souls-like",
+    "Difficult"
+   ]
   },
   {
    "appid": 910038,
@@ -1149,7 +1327,12 @@
     "total": 40000,
     "pct": 95,
     "desc": "Negative"
-   }
+   },
+   "tags": [
+    "RPG",
+    "Turn-Based Strategy",
+    "Card Game"
+   ]
   },
   {
    "appid": 910039,
@@ -1185,7 +1368,12 @@
     "total": 40,
     "pct": 75,
     "desc": "Overwhelmingly Positive"
-   }
+   },
+   "tags": [
+    "Simulation",
+    "Co-op",
+    "Cozy"
+   ]
   }
  ]
 }

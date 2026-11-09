@@ -50,7 +50,7 @@ PLAYS = ("never", "tried", "played")
 LANE_F = ("none", "next", "someday", "skip", "done")
 MC_OPTS = (60, 70, 75, 80, 85, 90)
 MC_MAX_OPTS = (59, 69, 79, 89)
-UNK_KEYS = ("gen", "pub", "dev", "pt", "mc", "yr", "ctrl", "rv")
+UNK_KEYS = ("gen", "pub", "dev", "tag", "pt", "mc", "yr", "ctrl", "rv")
 NAME_SUFFIXES = ("inc", "llc", "ltd", "co", "corp", "corporation", "gmbh", "sa", "ab", "limited")
 REVIEW_LEVELS = (
     ("overwhelmingly-positive", "Overwhelmingly Positive"), ("very-positive", "Very Positive"),
@@ -222,6 +222,7 @@ class Game:
     pub_keys: tuple[str, ...] = ()
     dev_keys: tuple[str, ...] = ()
     reviews: Reviews | None = None
+    tags: tuple[str, ...] = ()  # Steam store tags, exact display names, Steam's vote order
 
 
 def _names(v: Any) -> tuple[str, ...]:
@@ -282,6 +283,7 @@ def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
         publishers=publishers, developers=developers,
         pub_keys=_keys(publishers), dev_keys=_keys(developers),
         reviews=reviews,
+        tags=_names(raw.get("tags")),
     )
 
 
@@ -348,6 +350,8 @@ def is_unknown(g: Game, k: str) -> bool:
         return not g.pub_keys
     if k == "dev":
         return not g.dev_keys
+    if k == "tag":
+        return not g.tags
     if k == "pt":
         return not (g.proton and g.proton.tier)
     if k == "mc":
@@ -439,6 +443,8 @@ class Filters:
     publishers_unknown: bool = False
     developers: tuple[str, ...] = ()
     developers_unknown: bool = False
+    tags: tuple[str, ...] = ()  # exact Steam tag names
+    tags_unknown: bool = False
     reviews: tuple[str, ...] = ()
     reviews_unknown: bool = False
     unknown_only: tuple[str, ...] = ()  # UNK_KEYS
@@ -463,6 +469,8 @@ class Filters:
             names.append("publishers")
         if self.developers:
             names.append("developers")
+        if self.tags:
+            names.append("tags")
         if self.genres:
             names.append("genres")
         if self.has_note is not None:
@@ -489,6 +497,7 @@ class Filters:
             "controller": {"controller": (), "controller_unknown": False},
             "publishers": {"publishers": (), "publishers_unknown": False},
             "developers": {"developers": (), "developers_unknown": False},
+            "tags": {"tags": (), "tags_unknown": False},
             "genres": {"genres": (), "genres_unknown": False},
             "has_note": {"has_note": None},
             "unknown_only": {"unknown_only": ()},
@@ -553,6 +562,8 @@ def clean(raw: Mapping[str, Any]) -> Filters:
         publishers_unknown=o.get("pubUnk") is True,
         developers=_names_in(o.get("dev")),
         developers_unknown=o.get("devUnk") is True,
+        tags=_names_in(o.get("tag")),
+        tags_unknown=o.get("tagUnk") is True,
         reviews=tuple(_pick_in(o.get("rv"), REVIEW_KEYS)),
         reviews_unknown=o.get("rvUnk") is True,
         unknown_only=tuple(_pick_in(o.get("unk"), UNK_KEYS)),
@@ -611,6 +622,12 @@ def passes(g: Game, f: Filters, triage: Mapping[int, str], notes: Mapping[int, s
             if not f.developers_unknown:
                 return False
         elif not any(k in f.developers for k in g.dev_keys):
+            return False
+    if f.tags:
+        if not g.tags:
+            if not f.tags_unknown:
+                return False
+        elif not any(t in f.tags for t in g.tags):
             return False
     if f.reviews:
         b = review_bucket(g)

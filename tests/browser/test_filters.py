@@ -121,6 +121,24 @@ class Filters(unittest.TestCase):
     def test_only_unknown_publisher(self):
         self.check("unk=pub", lambda g: not keys(g, "publishers"))
 
+    def test_tag_filter_matches_exact_names_any_of(self):
+        self.check("tag=Metroidvania", lambda g: "Metroidvania" in g.get("tags", []))
+        self.check("tag=Souls-like&tag=Roguelike", lambda g: {"Souls-like", "Roguelike"} & set(g.get("tags", [])))
+
+    def test_tag_filter_with_unknown_included_and_only_unknown(self):
+        self.check("tag=Cozy&tagUnk=1", lambda g: not g.get("tags") or "Cozy" in g["tags"])
+        self.check("unk=tag", lambda g: not g.get("tags"))
+
+    def test_tag_picker_lists_tags_with_counts(self):
+        page = self.open("view=all")
+        buttons = page.query_selector_all('#opts-tag button[data-fa="tag"]')
+        from collections import Counter
+        counts = Counter(t for g in GAMES for t in set(g.get("tags", [])))
+        self.assertEqual(len(buttons), min(30, len(counts)))
+        top, n = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
+        self.assertEqual(buttons[0].inner_text().split(), top.split() + [str(n)])
+        self.assertEqual(self.problems, [])
+
     def test_only_unknown_works_for_every_dimension(self):
         self.check("unk=dev", lambda g: not keys(g, "developers"))
         self.check("unk=gen", lambda g: not g["genres"])

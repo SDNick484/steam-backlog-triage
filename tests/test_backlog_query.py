@@ -244,11 +244,12 @@ class PortedDomain(unittest.TestCase):
 
     def test_relaxation_order(self):
         every = q.Filters(metacritic_min=60, reviews=("mixed",), year_from=2000, protondb=("gold",),
-                          controller=("full",), publishers=("a",), developers=("b",), genres=("RPG",),
+                          controller=("full",), publishers=("a",), developers=("b",), tags=("Metroidvania",),
+                          genres=("RPG",),
                           has_note=True, unknown_only=("gen",), hours_min=1, deck=(3,), play_state=("never",),
                           lane=("next",))
         self.assertEqual(every.active(), ["metacritic", "reviews", "year", "protondb", "controller", "publishers",
-                                          "developers", "genres", "has_note", "unknown_only", "length", "deck",
+                                          "developers", "tags", "genres", "has_note", "unknown_only", "length", "deck",
                                           "play_state", "lane"])
         for name in [*every.active(), "query"]:
             self.assertNotIn(name, every.without(name).active())
@@ -335,6 +336,11 @@ STATES = [
     {"view": "all", "ctrl": ["partial"]}, {"view": "all", "ctrl": ["none"], "ctrlUnk": True},
     {"view": "all", "pub": ["devolver digital", "finji"]}, {"view": "all", "pub": ["valve"], "pubUnk": True},
     {"view": "all", "dev": ["studio alpha"]}, {"view": "all", "dev": ["studio beta"], "devUnk": True},
+    {"view": "all", "tag": ["Metroidvania"]}, {"view": "all", "tag": ["Souls-like", "Roguelike"]},
+    {"view": "all", "tag": ["Cozy"], "tagUnk": True}, {"view": "all", "unk": ["tag"]},
+    {"view": "all", "tag": ["metroidvania"]}, {"view": "all", "tag": ["Metroidvania", "Difficult"], "tagUnk": True, "deck": [3]},
+    {"view": "backlog", "tag": ["Souls-like"], "dsrc": "main", "dmax": 30},
+    {"view": "all", "tag": [""] + ["Pixel Graphics"] * 2 + ["x" * 81], "gen": ["RPG"]},
     {"view": "all", "rv": ["mixed", "few"]}, {"view": "all", "rv": ["very-positive"], "rvUnk": True},
     {"view": "all", "unk": ["gen"]}, {"view": "all", "unk": ["pub", "rv"]}, {"view": "all", "unk": ["mc", "yr", "ctrl"]},
     {"view": "all", "play": ["never"]}, {"view": "all", "play": ["tried", "played"]},
@@ -352,6 +358,7 @@ STATES = [
 class FilterVectors(unittest.TestCase):
     def test_states_cover_enough(self):
         self.assertGreaterEqual(len(STATES), 30)
+        self.assertGreaterEqual(sum(1 for s in STATES if "tag" in s or "tagUnk" in s or "tag" in s.get("unk", ())), 6)
 
     def test_page_parity(self):
         node_ids = run_node(
@@ -369,6 +376,21 @@ class FilterVectors(unittest.TestCase):
         sizes = {len(q.selected(GAMES, q.clean(s), TRIAGE, NOTES)) for s in STATES}
         self.assertGreater(len(sizes), 8)
         self.assertIn(0, sizes | {0})
+
+    def test_tags_are_exact_names_and_blank_is_unknown(self):
+        self.assertEqual(q.normalize(raw(tags=[" Souls-like ", "", 5, "Metroidvania"] + ["T"] * 12)).tags[:2],
+                         ("Souls-like", "Metroidvania"))
+        self.assertEqual(len(q.normalize(raw(tags=[f"T{i}" for i in range(30)])).tags), 10)
+        self.assertEqual(q.normalize(raw()).tags, ())
+        self.assertEqual(q.normalize(raw(tags="Souls-like")).tags, ())
+        f = q.clean({"view": "all", "tag": ["Metroidvania", "", "Metroidvania", "x" * 81], "tagUnk": True})
+        self.assertEqual((f.tags, f.tags_unknown), (("Metroidvania",), True))
+        by = {g.name: g for g in GAMES}
+        self.assertTrue(q.passes(by["Fixture Game 03"], q.clean({"unk": ["tag"]}), TRIAGE, NOTES))
+        self.assertFalse(q.passes(by["Fixture Game 02"], q.clean({"tag": ["metroidvania"]}), TRIAGE, NOTES))
+        self.assertTrue(q.passes(by["Fixture Game 02"], q.clean({"tag": ["Metroidvania"]}), TRIAGE, NOTES))
+        self.assertTrue(q.passes(by["Fixture Game 03"], q.clean({"tag": ["Metroidvania"], "tagUnk": True}), TRIAGE, NOTES))
+        self.assertFalse(q.passes(by["Fixture Game 03"], q.clean({"tag": ["Metroidvania"]}), TRIAGE, NOTES))
 
     def test_clean_drops_invalid_values(self):
         f = q.clean({"mc": 82, "mcmax": 100, "deck": ["7"], "rv": ["great"], "view": "bogus", "q": "x" * 300})

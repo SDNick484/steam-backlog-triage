@@ -572,7 +572,8 @@ const S = {
   devLabels: new Map(),
   pubGroups: new Map(),      // normalized publisher key -> { key, label, n }, for the whole library
   devGroups: new Map(),
-  pickQ: { pub: "", dev: "" }, // text typed in the publisher / developer pickers
+  tagGroups: new Map(),      // tag name -> { key, label, n }, for the whole library
+  pickQ: { pub: "", dev: "", tag: "" }, // text typed in the publisher / developer / tag pickers
   metric: "games",           // statistics: games | hours | never
   statShow: { gen: false, pub: false, dev: false }, // statistics: "Show all" expanded
   statQ: { pub: "", dev: "" },                      // statistics: text typed in the publisher / developer search
@@ -637,6 +638,17 @@ function nameGroups(games, field) {
   return groups;
 }
 
+// Steam store tags are matched by their exact display name, so the "key" of a tag is its name. name -> { key, label, n }:
+// n counts games (once each).
+function tagGroups(games) {
+  const groups = new Map();
+  for (const g of games) for (const t of new Set(g.tags || [])) {
+    const e = groups.get(t);
+    if (e) e.n++; else groups.set(t, { key: t, label: t, n: 1 });
+  }
+  return groups;
+}
+
 // The newer export fields. Kept apart from normalize() on purpose: normalize() is part of the score parity check
 // (SCORING.md), so changing it means regenerating the vectors in two repositories. Unknown or malformed values
 // become "no data", never a failure.
@@ -647,6 +659,7 @@ function normalizeExtras(g) {
   return {
     publishers: names(g.publishers),
     developers: names(g.developers),
+    tags: names(g.tags),
     reviews: r && typeof r === "object"
       ? { total: Math.max(0, n(r.total) || 0), pct: n(r.pct), desc: typeof r.desc === "string" ? r.desc : null }
       : null,
@@ -679,12 +692,13 @@ function mcBucket(g) {
 }
 
 // Dimensions that can be filtered down to "only games with no data" (the f.unk list).
-const UNK_KEYS = ["gen", "pub", "dev", "pt", "mc", "yr", "ctrl", "rv"];
+const UNK_KEYS = ["gen", "pub", "dev", "tag", "pt", "mc", "yr", "ctrl", "rv"];
 function isUnknown(g, k) {
   switch (k) {
     case "gen": return !(g.genres && g.genres.length);
     case "pub": return !(g.pubKeys && g.pubKeys.length);
     case "dev": return !(g.devKeys && g.devKeys.length);
+    case "tag": return !(g.tags && g.tags.length);
     case "pt": return !(g.proton && g.proton.tier);
     case "mc": return !g.metacritic;
     case "yr": return !g.year;
@@ -854,6 +868,7 @@ const DEFAULT_F = {
   ymin: null, ymax: null, yrUnk: false,
   ctrl: [], ctrlUnk: false,
   pub: [], pubUnk: false, dev: [], devUnk: false,
+  tag: [], tagUnk: false,
   rv: [], rvUnk: false,
   unk: [],
   play: [], lane: [], notes: "",
@@ -895,6 +910,8 @@ function clean(raw) {
   r.pubUnk = o.pubUnk === true;
   r.dev = names(o.dev);
   r.devUnk = o.devUnk === true;
+  r.tag = names(o.tag);
+  r.tagUnk = o.tagUnk === true;
   r.rv = pickIn(o.rv, REVIEW_KEYS);
   r.rvUnk = o.rvUnk === true;
   r.unk = pickIn(o.unk, UNK_KEYS);
@@ -967,7 +984,7 @@ function activeCount() {
     f.q.trim() !== "", f.deck.length > 0, f.gen.length > 0,
     f.dnone || f.dmin !== null || f.dmax !== null, f.pt.length > 0,
     f.mc !== null || f.mcmax !== null, f.ymin !== null || f.ymax !== null, f.ctrl.length > 0,
-    f.pub.length > 0, f.dev.length > 0, f.rv.length > 0, f.unk.length > 0,
+    f.pub.length > 0, f.dev.length > 0, f.tag.length > 0, f.rv.length > 0, f.unk.length > 0,
     f.play.length > 0, f.lane.length > 0, f.notes !== "",
   ].filter(Boolean).length;
 }
@@ -1011,7 +1028,7 @@ function sampleGames() {
     deck, hltb: h ? { main: h[0], extra: h[1], complete: h[2] } : null,
     genres, metacritic: mc, year, controller: null,
     proton: SAMPLE_PROTON[appid] ? { tier: SAMPLE_PROTON[appid][0], total: SAMPLE_PROTON[appid][1] } : null,
-    hasProton: true, hasDetails: true,
+    hasProton: true, hasDetails: true, tags: [],
     publishers: SAMPLE_META[appid] ? SAMPLE_META[appid][0].split(", ") : [],
     developers: SAMPLE_META[appid] ? SAMPLE_META[appid][1].split(", ") : [],
     reviews: SAMPLE_META[appid] ? { total: SAMPLE_META[appid][2], pct: SAMPLE_META[appid][3], desc: SAMPLE_META[appid][4] } : null,
@@ -1140,6 +1157,7 @@ function setLibrary(games, source, meta) {
   games.forEach(annotateNames);
   S.pubGroups = nameGroups(games, "pub");
   S.devGroups = nameGroups(games, "dev");
+  S.tagGroups = tagGroups(games);
   S.pubLabels = new Map([...S.pubGroups].map(([k, e]) => [k, e.label]));
   S.devLabels = new Map([...S.devGroups].map(([k, e]) => [k, e.label]));
   S.games = games;
@@ -1280,6 +1298,10 @@ function passes(g) {
     if (!g.devKeys.length) { if (!f.devUnk) return false; }
     else if (!g.devKeys.some((k) => f.dev.includes(k))) return false;
   }
+  if (f.tag.length) {
+    if (!g.tags.length) { if (!f.tagUnk) return false; }
+    else if (!g.tags.some((t) => f.tag.includes(t))) return false;
+  }
   if (f.rv.length) {
     const b = reviewBucket(g);
     if (b === null) { if (!f.rvUnk) return false; }
@@ -1354,7 +1376,7 @@ function unkHtml(key) {
 }
 // "Only unknown" (the f.unk list): show just the games with no data for a dimension. Turning it on clears that
 // dimension's own values, since a game can't be both known and unknown.
-const UNK_FIELDS = { gen: ["gen", "genUnk"], pub: ["pub", "pubUnk"], dev: ["dev", "devUnk"], pt: ["pt", "ptUnk"],
+const UNK_FIELDS = { gen: ["gen", "genUnk"], pub: ["pub", "pubUnk"], dev: ["dev", "devUnk"], tag: ["tag", "tagUnk"], pt: ["pt", "ptUnk"],
                      mc: ["mc", "mcmax", "mcUnk"], yr: ["ymin", "ymax", "yrUnk"], ctrl: ["ctrl", "ctrlUnk"], rv: ["rv", "rvUnk"] };
 function onlyUnkHtml(dim) {
   return `<label class="unk"><input type="checkbox" data-fu="${dim}" ${S.f.unk.includes(dim) ? "checked" : ""}> Only unknown</label>`;
@@ -1365,8 +1387,9 @@ function fgroup(title, body, unk, dim) {
 }
 // Publisher / developer picker: a search box, the chosen values, and the best matches. Many hundreds of values, so
 // the list is searched, not shown whole.
+const pickGroups = (field) => (field === "pub" ? S.pubGroups : field === "dev" ? S.devGroups : S.tagGroups);
 function pickerOptions(field) {
-  const groups = field === "pub" ? S.pubGroups : S.devGroups;
+  const groups = pickGroups(field);
   const q = S.pickQ[field].trim().toLowerCase();
   const chosen = new Set(S.f[field]);
   let list = [...groups.values()].filter((e) => !chosen.has(e.key) && (!q || e.label.toLowerCase().includes(q) || e.key.includes(q)));
@@ -1377,7 +1400,7 @@ function pickerOptions(field) {
     (list.length > shown.length ? `<p class="fhint">${(list.length - shown.length).toLocaleString()} more. Type to narrow the list.</p>` : "");
 }
 function pickerHtml(field, noun) {
-  const groups = field === "pub" ? S.pubGroups : S.devGroups;
+  const groups = pickGroups(field);
   const chosen = S.f[field].map((k) => `<button type="button" data-fa="${field}" data-fv="${esc(k)}" aria-pressed="true" aria-label="Remove ${esc(groups.has(k) ? groups.get(k).label : k)}">${esc(groups.has(k) ? groups.get(k).label : k)} ✕</button>`).join("");
   return `${chosen ? `<div class="seg">${chosen}</div>` : ""}
     <input type="search" data-ps="${field}" placeholder="Search ${noun}s" value="${esc(S.pickQ[field])}" autocomplete="off" aria-label="Search ${noun}s">
@@ -1412,6 +1435,7 @@ function renderPanel() {
      <label>At most<select data-fs="mcmax"><option value="">Any</option>${MC_MAX_OPTS.map((v) => `<option value="${v}" ${f.mcmax === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>`, "mcUnk", "mc"));
   parts.push(fgroup("Steam user reviews",
     segHtml("rv", REVIEW_LEVELS) + (S.games.some((g) => g.reviews) ? "" : `<p class="fhint">No review data yet. Re-export with --details.</p>`), "rvUnk", "rv"));
+  parts.push(fgroup("Tags", pickerHtml("tag", "tag"), "tagUnk", "tag"));
   parts.push(fgroup("Publisher", pickerHtml("pub", "publisher"), "pubUnk", "pub"));
   parts.push(fgroup("Developer", pickerHtml("dev", "developer"), "devUnk", "dev"));
   parts.push(fgroup("Release year",
