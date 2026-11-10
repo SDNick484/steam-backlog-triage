@@ -255,11 +255,11 @@ input::placeholder{color:var(--muted)}
 .statbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
 .scards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 @media (max-width:820px){.scards{grid-template-columns:minmax(0,1fr)}}
-.scard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;box-shadow:var(--shadow)}
+.scard,.trendcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;box-shadow:var(--shadow)}
 .scard.wide{grid-column:1/-1}
-.scard-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
-.scard h3{font-family:var(--body);font-size:15px;font-weight:700}
-.scard-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.scard-head,.trendcard .scard-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
+.scard h3,.trendcard h3{font-family:var(--body);font-size:15px;font-weight:700}
+.scard-tools,.trendcard .scard-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .cov{font-size:12px;color:var(--muted)}
 .srows{display:flex;flex-direction:column;gap:1px}
 .srow{display:grid;grid-template-columns:minmax(0,38%) minmax(0,1fr) 3.6em;gap:0 10px;align-items:center;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:4px 6px;cursor:pointer;color:var(--ink)}
@@ -291,6 +291,46 @@ input::placeholder{color:var(--muted)}
 .yhist text{font-size:10px;fill:var(--muted);font-family:var(--body)}
 .yhist .ybar:focus{outline:none}
 .yhist .ybar:focus-visible rect.hit{stroke:var(--accent);stroke-width:1.5}
+/* Trend (history) */
+#trendSec[hidden]{display:none!important}
+.tcharts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 24px}
+@media (max-width:820px){.tcharts{grid-template-columns:minmax(0,1fr)}}
+.tchart{display:flex;flex-direction:column;gap:6px;min-width:0}
+.tchart.wide{grid-column:1/-1}
+.tchart h4{font-family:var(--body);font-size:13px;font-weight:600;color:var(--muted);margin:0}
+.tnow{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
+.tnow b{font-family:var(--display);font-size:26px;font-weight:600;line-height:1.15;font-variant-numeric:tabular-nums}
+.tnow span{font-size:12.5px;color:var(--muted)}
+.tsvg{width:100%;max-width:620px;height:auto;display:block;overflow:visible}
+.tsvg text{font-size:10px;fill:var(--muted);font-family:var(--body)}
+.tsvg .gl{stroke:var(--line);stroke-width:1}
+.tsvg path.tline{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.tsvg .tpt{fill:transparent}
+.tsvg .tpt:hover{fill:var(--accent);stroke:var(--surface);stroke-width:2}
+.tsvg .tend{fill:var(--accent);stroke:var(--surface);stroke-width:2}
+.tsvg rect.added{fill:var(--unk)}
+.tsvg rect.closed{fill:var(--accent)}
+.tsvg .hit{fill:transparent}
+.tsvg .tmonth:hover .hit{fill:var(--surface-2)}
+.tlegend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--ink-2)}
+.tlegend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.tlegend i.added{background:var(--unk)}
+.tlegend i.closed{background:var(--accent)}
+#trendTable{font-size:13px}
+#trendTable summary,.fyear summary{cursor:pointer;font-weight:600}
+#trendTable table{border-collapse:collapse;width:100%;margin-top:8px;font-variant-numeric:tabular-nums}
+#trendTable th,#trendTable td{text-align:right;padding:3px 8px;border-bottom:1px solid var(--line)}
+#trendTable th:first-child,#trendTable td:first-child{text-align:left}
+#trendTable th{color:var(--muted);font-weight:600}
+#trendTable .tscroll{overflow-x:auto}
+#finished{display:flex;flex-direction:column;gap:8px;min-width:0}
+#finished h4{font-family:var(--body);font-size:14px;font-weight:700;margin:0}
+.fyear{border-top:1px solid var(--line);padding-top:8px}
+.finlist{list-style:none;margin:8px 0 4px;padding:0;display:flex;flex-direction:column;gap:2px}
+.finrow{display:grid;grid-template-columns:6.5em minmax(0,1fr) auto;gap:0 12px;align-items:baseline;padding:4px 2px;font-size:13.5px}
+.finrow .fdate,.finrow .fplay{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.finrow .fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:560px){.finrow{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n p" "d d"}.finrow .fname{grid-area:n}.finrow .fplay{grid-area:p}.finrow .fdate{grid-area:d}}
 
 /* Ask thread */
 .only-ask{display:flex;flex-direction:column;gap:14px}
@@ -460,6 +500,12 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     <div class="list only-list" id="list"></div>
     <div class="only-stats" id="statsSec">
       <div class="tiles" id="statTiles"></div>
+      <section class="trendcard" id="trendSec" aria-label="Trend" hidden>
+        <div class="scard-head"><h3>Trend</h3><span class="scard-tools"><span class="seg" role="group" aria-label="Range" id="trendRange"></span></span></div>
+        <p class="fhint" id="trendNote"></p>
+        <div class="tcharts" id="trendBody"></div>
+        <div id="finished"></div>
+      </section>
       <div class="statbar">
         <div class="seg" role="group" aria-label="Measure for the bars" id="metricSeg"></div>
         <p class="fhint" id="statNote"></p>
@@ -604,6 +650,10 @@ const S = {
   statShow: { gen: false, pub: false, dev: false, tag: false }, // statistics: "Show all" expanded
   statQ: { pub: "", dev: "", tag: "" },             // statistics: text typed in the publisher / developer / tag search
   yearStep: 1,               // statistics: 1 = by year, 10 = by decade
+  hist: null,                // api/history: { days, lanes } (self-hosted, stats view), null when unavailable
+  trendRange: "365",         // statistics Trend: "90", "365" or "all"
+  trendOpen: new Map(),      // Trend details elements the person opened or closed
+  trendW: 0,
   stats: null,               // the last statsFor() result
   f: null,                   // filter state, set below
   chatOn: null,              // Ask: null until bootServer() has finished, then whether api/ask/status allows it
@@ -1709,11 +1759,170 @@ function yearChartHtml() {
   return `<svg class="yhist" viewBox="0 0 ${W} ${H}" role="group" aria-label="Release years, by ${S.yearStep === 10 ? "decade" : "year"}">${bars}${labels}` +
     `<text x="${left}" y="10">${esc(statValue(topRow))}</text></svg>${unk}`;
 }
+// ---------------------------------------------------------------- Trend (history)
+// From GET api/history: one row per day the server recorded (history.jsonl) and every lane change (lane_log.jsonl).
+// Day rows carry the server's own date; lane changes are UTC seconds and are shown in this browser's time zone.
+const TREND_RANGES = [["90", "90 days"], ["365", "1 year"], ["all", "All"]];
+const TREND_MIN_DAYS = 7;
+const DAY_MS = 864e5;
+const trendW = () => (innerWidth <= 560 ? 340 : 540);
+function dayMs(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s)); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; }
+const fmtDay = (ms) => new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+const fmtMonth = (key, short) => { const [y, m] = key.split("-").map(Number); return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, short ? { month: "short", year: "2-digit", timeZone: "UTC" } : { month: "long", year: "numeric", timeZone: "UTC" }); };
+const localMonth = (ts) => { const d = new Date(ts * 1000); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
+function cleanDay(r) {
+  if (!r || typeof r !== "object") return null;
+  const t = dayMs(r.date), num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+  if (isNaN(t) || num(r.games) === null || num(r.backlog) === null) return null;
+  return { t, date: r.date, games: r.games, backlog: r.backlog, hours: num(r.backlogHours), withTime: num(r.backlogWithTime) };
+}
+async function loadHistory() {
+  S.hist = null;
+  try {
+    const r = await fetch(API("api/history"), { cache: "no-store" });
+    if (!r.ok) return;                                   // a server from before history: no Trend section
+    const d = await r.json();
+    const days = (Array.isArray(d.days) ? d.days : []).map(cleanDay).filter(Boolean).sort((a, b) => a.t - b.t);
+    const lanes = (Array.isArray(d.lanes) ? d.lanes : []).filter((e) => e && Number.isInteger(e.ts) && Number.isInteger(e.appid) && typeof e.from === "string" && typeof e.to === "string");
+    S.hist = { days, lanes };
+  } catch (e) { S.hist = null; }
+}
+// A line over `pts` ([{t, v, tip}]) with its own y range (not from zero: the question is which way it is going).
+function lineChartHtml(kind, pts, label, fmt) {
+  const W = trendW(), H = 150, L = 46, R = 8, T = 10, B = 20;
+  let lo = Math.min(...pts.map((p) => p.v)), hi = Math.max(...pts.map((p) => p.v));
+  const pad = (hi - lo) * 0.08 || 1;
+  lo = Math.max(0, lo - pad); hi += pad;
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  const x = (t) => L + (t1 === t0 ? (W - L - R) / 2 : ((t - t0) / (t1 - t0)) * (W - L - R));
+  const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const path = pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + "," + y(p.v).toFixed(1)).join("");
+  const step = Math.ceil(pts.length / 200);
+  const dots = pts.filter((p, i) => i % step === 0 || i === pts.length - 1)
+    .map((p) => `<circle class="tpt" cx="${x(p.t).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="5"><title>${esc(p.tip)}</title></circle>`).join("");
+  const end = pts[pts.length - 1];
+  const grid = [0, 0.5, 1].map((f) => `<line class="gl" x1="${L}" x2="${W - R}" y1="${(T + f * (H - T - B)).toFixed(1)}" y2="${(T + f * (H - T - B)).toFixed(1)}"></line>`).join("");
+  return `<svg class="tsvg" data-chart="${kind}" data-n="${pts.length}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${grid}` +
+    `<text x="${L - 5}" y="${T + 3}" text-anchor="end">${esc(fmt(hi))}</text><text x="${L - 5}" y="${H - B + 3}" text-anchor="end">${esc(fmt(lo))}</text>` +
+    `<text x="${L}" y="${H - 5}" text-anchor="start">${esc(fmtDay(t0))}</text><text x="${W - R}" y="${H - 5}" text-anchor="end">${esc(fmtDay(t1))}</text>` +
+    `<path class="tline" d="${path}"></path>${dots}<circle class="tend" cx="${x(end.t).toFixed(1)}" cy="${y(end.v).toFixed(1)}" r="4"></circle></svg>`;
+}
+function trendChartBlock(kind, title, pts, unit, fmt) {
+  const first = pts[0], last = pts[pts.length - 1], d = last.v - first.v;
+  const change = d === 0 ? "no change" : `${d < 0 ? "down" : "up"} ${fmt(Math.abs(d))}`;
+  const label = `${title}: ${fmt(first.v)} on ${fmtDay(first.t)}, ${fmt(last.v)} on ${fmtDay(last.t)}`;
+  return `<div class="tchart"><h4>${esc(title)}</h4><div class="tnow"><b class="num">${esc(fmt(last.v))}</b><span>${esc(unit)}; ${esc(change)} since ${esc(fmtDay(first.t))}</span></div>` +
+    lineChartHtml(kind, pts, label, fmt) + `</div>`;
+}
+// Games added (the library grew between two recorded days, counted in the later day's month) and games closed
+// (a lane change into done or skip from some other lane), by month, from the first month shown to the last day.
+function flowMonths(inRange) {
+  const days = S.hist.days, added = new Map(), closed = new Map(), CLOSED = ["done", "skip"];
+  for (let i = 1; i < days.length; i++) {
+    const g = days[i].games - days[i - 1].games;
+    if (g > 0) added.set(days[i].date.slice(0, 7), (added.get(days[i].date.slice(0, 7)) || 0) + g);
+  }
+  for (const e of S.hist.lanes) if (CLOSED.includes(e.to) && !CLOSED.includes(e.from)) closed.set(localMonth(e.ts), (closed.get(localMonth(e.ts)) || 0) + 1);
+  if (!days.length) return [];
+  let start = inRange[0].date.slice(0, 7);
+  if (S.trendRange === "all") for (const k of closed.keys()) if (k < start) start = k;
+  const end = days[days.length - 1].date.slice(0, 7), out = [];
+  let [y, m] = start.split("-").map(Number);
+  for (;;) {
+    const key = y + "-" + String(m).padStart(2, "0");
+    out.push({ key, added: added.get(key) || 0, closed: closed.get(key) || 0 });
+    if (key >= end) break;
+    if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+function flowChartHtml(months) {
+  const W = trendW(), H = 150, L = 46, R = 8, T = 10, B = 20;
+  const vmax = Math.max(1, ...months.map((o) => Math.max(o.added, o.closed)));
+  const slot = (W - L - R) / months.length, bw = Math.max(2, Math.min(14, (slot - 6) / 2)), ih = H - T - B;
+  const bar = (cls, x, v) => { const h = v ? Math.max(2, (v / vmax) * ih) : 0; return h ? `<rect class="${cls}" x="${x.toFixed(1)}" y="${(T + ih - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2"></rect>` : ""; };
+  const every = Math.ceil(months.length / (W < 400 ? 4 : 8));
+  let body = "", labels = "";
+  months.forEach((o, i) => {
+    const x0 = L + i * slot, cx = x0 + slot / 2;
+    body += `<g class="tmonth" data-month="${o.key}" data-added="${o.added}" data-closed="${o.closed}"><title>${esc(fmtMonth(o.key))}: ${o.added} added, ${o.closed} closed</title>` +
+      `<rect class="hit" x="${x0.toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${ih}"></rect>${bar("added", cx - bw - 1, o.added)}${bar("closed", cx + 1, o.closed)}</g>`;
+    if (i % every === 0) labels += `<text x="${cx.toFixed(1)}" y="${H - 5}" text-anchor="middle">${esc(fmtMonth(o.key, true))}</text>`;
+  });
+  return `<svg class="tsvg" data-chart="flow" viewBox="0 0 ${W} ${H}" role="img" aria-label="Games added to the library and games closed, by month">` +
+    `<line class="gl" x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}"></line><line class="gl" x1="${L}" x2="${W - R}" y1="${T}" y2="${T}"></line>` +
+    `<text x="${L - 5}" y="${T + 3}" text-anchor="end">${vmax}</text><text x="${L - 5}" y="${T + ih + 3}" text-anchor="end">0</text>${body}${labels}</svg>`;
+}
+function trendTableHtml(months) {
+  const byMonth = new Map();
+  for (const d of S.hist.days) byMonth.set(d.date.slice(0, 7), d);                // the month's last recorded day
+  const rows = months.map((o) => {
+    const d = byMonth.get(o.key);
+    return `<tr data-month="${o.key}"><td>${esc(fmtMonth(o.key))}</td><td>${d ? d.backlog.toLocaleString() : "–"}</td><td>${d && d.hours !== null ? esc(fmtHours(d.hours)) : "–"}</td><td>${o.added}</td><td>${o.closed}</td></tr>`;
+  }).join("");
+  return `<details id="trendTable" data-tkey="table"${S.trendOpen.get("table") ? " open" : ""}><summary>Show the numbers</summary><div class="tscroll"><table><thead><tr><th scope="col">Month</th><th scope="col">Backlog at month end</th><th scope="col">Backlog hours</th><th scope="col">Added</th><th scope="col">Closed</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+}
+const playText = (g) => (!g.playtime ? "not launched" : g.playtime < 60 ? `${g.playtime} min` : fmtHours(g.playtime / 60));
+function finishedHtml() {
+  const lanes = S.hist.lanes, last = new Map();
+  for (const e of lanes) last.set(e.appid, e);                                      // lane_log is oldest first
+  const items = [...last.values()].filter((e) => e.to === "done" && currentTriage().get(e.appid) === "done").sort((a, b) => b.ts - a.ts);
+  if (!items.length) return `<h4>Finished</h4><p class="fhint">Nothing yet. Games you mark Done from now on are listed here.</p>`;
+  const byYear = new Map();
+  for (const e of items) { const y = new Date(e.ts * 1000).getFullYear(); if (!byYear.has(y)) byYear.set(y, []); byYear.get(y).push(e); }
+  const since = new Date(Math.min(...lanes.map((e) => e.ts)) * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const years = [...byYear.keys()].sort((a, b) => b - a);
+  return `<h4>Finished</h4><p class="fhint">Games marked Done since ${esc(since)} that are still Done. Earlier ones were not recorded.</p>` + years.map((y, i) => {
+    const key = "y" + y, open = S.trendOpen.has(key) ? S.trendOpen.get(key) : i === 0;
+    const rows = byYear.get(y).map((e) => {
+      const g = S.byId.get(e.appid);
+      const date = new Date(e.ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const name = g ? `<a class="fgame fname" href="${esc(BASE + "#" + filtersToParams(clean({ view: "all", q: g.name })).toString())}">${esc(g.name)}</a>` : `<span class="fname">App ${e.appid}</span>`;
+      return `<li class="finrow" data-ts="${e.ts}"><span class="fdate">${esc(date)}</span>${name}<span class="fplay">${g ? esc(playText(g)) : ""}</span></li>`;
+    }).join("");
+    return `<details class="fyear" data-year="${y}" data-tkey="${key}"${open ? " open" : ""}><summary>${y} · ${byYear.get(y).length} finished</summary><ul class="finlist">${rows}</ul></details>`;
+  }).join("");
+}
+function renderTrend() {
+  const sec = $("trendSec");
+  if (!S.hist || !S.server) { sec.hidden = true; return; }
+  sec.hidden = false;
+  S.trendW = trendW();
+  const days = S.hist.days, last = days.length ? days[days.length - 1].t : 0;
+  $("trendRange").innerHTML = TREND_RANGES.map(([v, l]) => `<button type="button" data-trange="${v}" aria-pressed="${S.trendRange === v}">${l}</button>`).join("");
+  const span = S.trendRange === "all" ? Infinity : Number(S.trendRange);
+  const inRange = days.filter((d) => last - d.t < span * DAY_MS);
+  $("finished").innerHTML = finishedHtml();
+  if (!days.length) {
+    $("trendNote").textContent = "No history yet. A row is recorded after your next lane change or export.";
+    $("trendBody").innerHTML = "";
+    return;
+  }
+  if (days.length < TREND_MIN_DAYS) {
+    const d = days[days.length - 1];
+    $("trendNote").textContent = `Collecting since ${fmtDay(days[0].t)}. The charts appear after ${TREND_MIN_DAYS} days of data.`;
+    $("trendBody").innerHTML = `<div class="tchart"><h4>Today</h4><div class="tnow"><b class="num">${d.backlog.toLocaleString()}</b><span>backlog games</span></div></div>` +
+      (d.hours !== null ? `<div class="tchart"><h4>Backlog length</h4><div class="tnow"><b class="num">${esc(fmtHours(d.hours))}</b><span>main story, ${d.withTime === null ? "" : d.withTime.toLocaleString() + " games with a time"}</span></div></div>` : "");
+    return;
+  }
+  $("trendNote").textContent = `Since ${fmtDay(days[0].t)}. A point is a day the server recorded; days with no change or export have none.`;
+  const nf = (v) => Math.round(v).toLocaleString();
+  const count = inRange.map((d) => ({ t: d.t, v: d.backlog, tip: `${fmtDay(d.t)}: ${d.backlog.toLocaleString()} backlog games` }));
+  const hours = inRange.filter((d) => d.hours !== null).map((d) => ({ t: d.t, v: d.hours, tip: `${fmtDay(d.t)}: ${fmtHours(d.hours)} left in the backlog` }));
+  const months = flowMonths(inRange);
+  $("trendBody").innerHTML = trendChartBlock("backlog", "Backlog games", count, "games", nf) +
+    (hours.length ? trendChartBlock("hours", "Backlog hours remaining", hours, "hours of main story", (v) => nf(v) + " h") : "") +
+    `<div class="tchart wide" id="trendFlow"><h4>Added and closed, by month</h4>${flowChartHtml(months)}` +
+    `<div class="tlegend"><span><i class="added"></i>Added to the library</span><span><i class="closed"></i>Closed (done or skip)</span></div>` +
+    `<p class="fhint">Added is how much the library grew between recorded days. Closed counts games moved to Done or Skip.</p>${trendTableHtml(months)}</div>`;
+}
+
 function tileHtml(k, v, small) {
   return `<div class="tile"><span class="tk">${esc(k)}</span><span class="tv num">${v}</span>${small ? `<small>${small}</small>` : ""}</div>`;
 }
 function renderStats() {
   syncControls();
+  renderTrend();
   $("listH").textContent = "Statistics";
   const rows = selected();
   const t0 = performance.now();
@@ -1866,6 +2075,7 @@ document.addEventListener("click", (e) => {
   if (!t) return;
   if (t.dataset.metric !== undefined) { S.metric = t.dataset.metric; try { localStorage.setItem("bt-metric", S.metric); } catch (x) {} renderStats(); return; }
   if (t.dataset.showall !== undefined) { S.statShow[t.dataset.showall] = !S.statShow[t.dataset.showall]; renderStats(); return; }
+  if (t.dataset.trange !== undefined) { S.trendRange = t.dataset.trange; try { localStorage.setItem("bt-trend-range", S.trendRange); } catch (x) {} renderTrend(); return; }
   if (t.dataset.ystep !== undefined) { S.yearStep = Number(t.dataset.ystep); renderStats(); return; }
   if (t.dataset.csv !== undefined) { copyPlain(csvFor(t.dataset.csv), t); return; }
   if (t.dataset.lane) { setLane(Number(t.dataset.appid), t.dataset.lane); return; }
@@ -1901,6 +2111,8 @@ function selectCode(btn) {
   toast("Selected. Press Ctrl+C or ⌘C to copy.");
 }
 
+document.addEventListener("toggle", (e) => { const k = e.target.dataset && e.target.dataset.tkey; if (k) S.trendOpen.set(k, e.target.open); }, true);
+window.addEventListener("resize", () => { if (MODE === "stats" && S.hist && trendW() !== S.trendW) renderTrend(); });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
   const bar = e.target.closest && e.target.closest("g[data-sd]");
@@ -2348,6 +2560,7 @@ async function bootServer() {
     if (S.chatOn && Number.isInteger(st.turns) && st.turns > 0) S.chatTurns = st.turns;
   } catch (e) { S.chatOn = false; }
   renderPill();
+  if (MODE === "stats") { await loadHistory(); renderTrend(); }
   if (MODE === "ask") renderChat();
   else if (MODE === "list" && S.chatOn) renderList();   // the empty list's "Ask instead" link
   initRefresh();
@@ -2445,6 +2658,7 @@ if (MODE === "ask") {
   }
 }
 try { const m = localStorage.getItem("bt-metric"); if (STAT_METRICS.includes(m)) S.metric = m; } catch (e) {}
+try { const r = localStorage.getItem("bt-trend-range"); if (TREND_RANGES.some(([v]) => v === r)) S.trendRange = r; } catch (e) {}
 setLibrary(sampleGames(), "sample", null);
 bootServer().then((isServer) => {
   if (isServer) return;
