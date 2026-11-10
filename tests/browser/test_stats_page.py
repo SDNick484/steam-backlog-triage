@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover
 
 REQUIRE = os.environ.get("REQUIRE_BROWSER") == "1"
 LIB = json.loads((HERE.parent / "fixtures" / "stats_library.json").read_text(encoding="utf-8"))
-CARDS = ["gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]
+CARDS = ["gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "where", "mc", "rv", "year"]
 
 
 def synthetic_library(n: int) -> dict:
@@ -165,6 +165,34 @@ class StatsPage(unittest.TestCase):
         self.assertRegex(text, r"Publisher known for 0 of 40")
         self.assertRegex(text, r"Steam reviews known for 0 of 40")
         self.assertRegex(text, r"Tags known for 0 of 40")
+        self.assertEqual(self.problems, [])
+
+    def test_played_on_deck_tile_and_where_rows_match_the_filters(self):
+        self.serve()
+        page = self.open("/stats", "view=all")
+        tile = page.inner_text("#statTiles")
+        want = sum(1 for g in LIB["games"] if g.get("deckPlaytime", 0) > 0)
+        self.assertRegex(tile, rf"Played on Deck\s+{want} games?")
+        self.assertRegex(tile, r"\d+% of all playtime")
+        rows = page.query_selector_all("#srows-where [data-sd]")
+        self.assertGreaterEqual(len(rows), 3)
+        for i in range(len(rows)):
+            page = self.open("/stats", "view=all") if i else page
+            el = page.query_selector_all("#srows-where [data-sd]")[i]
+            n, key = int(el.get_attribute("data-n")), el.get_attribute("data-sk")
+            el.click()
+            self.assertEqual(self.list_count(page, n), n, key)
+            self.assertIn(f"prog={key}", page.url)
+            # the same list from the filter panel's own URL
+            self.assertEqual(self.list_count(self.open("/", f"view=all&prog={key}"), n), n, key)
+        # "Started on Deck" lists exactly the games the tile counts
+        self.assertEqual(self.list_count(self.open("/", "view=all&prog=deck"), want), want)
+        csv_page = self.open("/stats", "view=all")
+        self.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=self.base)
+        csv_page.click("[data-csv=where]")
+        lines = csv_page.evaluate("navigator.clipboard.readText()").splitlines()
+        self.assertTrue(lines[0].lower().startswith("value"))
+        self.assertIn("Never on Deck,", "\n".join(lines))
         self.assertEqual(self.problems, [])
 
     def test_a_tag_row_and_the_tag_filter_give_the_same_count(self):

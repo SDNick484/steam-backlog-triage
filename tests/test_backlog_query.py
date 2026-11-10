@@ -353,6 +353,7 @@ STATES = [
     {"view": "all", "notes": "yes"}, {"view": "all", "notes": "no"},
     {"view": "all", "prog": ["deck"]}, {"view": "all", "prog": ["unstarted"]}, {"view": "all", "prog": ["deck", "unstarted"]},
     {"view": "backlog", "prog": ["deck"], "play": ["tried"]}, {"view": "all", "prog": ["deck", "bogus", "deck"]},
+    {"view": "all", "prog": ["mostdeck"]}, {"view": "all", "prog": ["mostelse", "deckonly"]}, {"view": "all", "prog": ["nodeck"]},
     {"view": "backlog", "deck": [3], "mc": 60, "play": ["never"], "ymin": 2000},
     # values clean() must drop
     {"view": "all", "mc": 82, "mcmax": 100, "deck": ["7"], "rv": ["great"]},
@@ -499,6 +500,32 @@ class FilterVectors(unittest.TestCase):
         self.assertEqual((f.metacritic_min, f.metacritic_max, f.has_note, f.unknown_only, f.genres),
                          (80, 89, False, ("gen", "pub"), ("a",)))
         self.assertEqual(q.clean({}), q.Filters())
+
+
+class WherePlayed(unittest.TestCase):
+    """Deck share buckets: the edges, page against Python, and every stats row against the filter that lists it."""
+    EDGE = [  # (playtime, deckPlaytime) -> bucket
+        (0, 0, "unstarted"), (60, 0, "nodeck"), (100, 100, "deckonly"), (100, 120, "deckonly"), (100, 50, "mostdeck"),
+        (101, 50, "mostelse"), (100, 49, "mostelse"), (100, 99, "mostdeck"), (1, 1, "deckonly"),
+    ]
+
+    def test_edges_match_the_page(self):
+        rows = [raw(appid=i + 1, name=f"E{i}", playtime=p, deckPlaytime=d) for i, (p, d, _) in enumerate(self.EDGE)]
+        want = run_node(page_code(), "INPUT.games.map(normalizeGame).map(whereKey)", games=rows)
+        self.assertEqual(want, [b for _, _, b in self.EDGE])
+        self.assertEqual([q.where_key(q.normalize(r)) for r in rows], want)
+
+    def test_every_row_equals_its_filter(self):
+        st = q.stats_for(GAMES)
+        self.assertGreaterEqual(len(st["dims"]["where"]["rows"]), 3)
+        for r in st["dims"]["where"]["rows"]:
+            with self.subTest(row=r["key"]):
+                f = q.clean({"view": "all", "prog": [r["key"]]})
+                self.assertEqual(len(q.selected(GAMES, f, TRIAGE, NOTES)), r["n"])
+        # the tile and the "started on Deck" filter agree, and the three Deck rows add up to it
+        started = len(q.selected(GAMES, q.clean({"view": "all", "prog": ["deck"]}), TRIAGE, NOTES))
+        self.assertEqual(started, st["tiles"]["deckGames"])
+        self.assertEqual(started, sum(r["n"] for r in st["dims"]["where"]["rows"] if r["key"] in ("deckonly", "mostdeck", "mostelse")))
 
 
 class StatsParity(unittest.TestCase):

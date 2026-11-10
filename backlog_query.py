@@ -49,7 +49,7 @@ SRCS = ("main", "extra", "complete")
 CTRLS = ("full", "partial", "none")
 PLAYS = ("never", "tried", "played")
 LANE_F = ("none", "next", "someday", "skip", "done")
-PROGS = ("inprog", "deck", "unstarted")
+PROGS = ("inprog", "deck", "unstarted", "deckonly", "mostdeck", "mostelse", "nodeck")
 MC_OPTS = (60, 70, 75, 80, 85, 90)
 MC_MAX_OPTS = (59, 69, 79, 89)
 UNK_KEYS = ("gen", "pub", "dev", "tag", "pt", "mc", "yr", "ctrl", "rv")
@@ -359,8 +359,19 @@ def in_progress(g: Game, triage: Mapping[int, str]) -> bool:
     )
 
 
+def where_key(g: Game) -> str:
+    """Where a game's playtime happened (the page's whereKey). Half or more on the Deck is "mostdeck"; all, "deckonly"."""
+    if g.playtime == 0:
+        return "unstarted"
+    if g.deck_playtime == 0:
+        return "nodeck"
+    if g.deck_playtime >= g.playtime:
+        return "deckonly"
+    return "mostdeck" if g.deck_playtime * 2 >= g.playtime else "mostelse"
+
+
 def _prog_match(g: Game, k: str, triage: Mapping[int, str]) -> bool:
-    return in_progress(g, triage) if k == "inprog" else g.deck_playtime > 0 if k == "deck" else g.playtime == 0
+    return in_progress(g, triage) if k == "inprog" else g.deck_playtime > 0 if k == "deck" else where_key(g) == k
 
 
 def review_bucket(g: Game) -> str | None:
@@ -885,10 +896,13 @@ STAT_LABELS: dict[str, dict[Any, str]] = {
     "ctrl": {"full": "Full", "partial": "Partial", "none": "None listed"},
     "len": {"short": "Under 5 h", "mid": "5–15 h", "long": "15–40 h", "epic": "40 h+"},
     "lane": {"none": "No lane", "next": "Up next", "someday": "Someday", "skip": "Skipped", "done": "Finished"},
+    "where": {"deckonly": "Deck only", "mostdeck": "Mostly Deck", "mostelse": "Mostly elsewhere",
+              "nodeck": "Never on Deck", "unstarted": "Not played"},
 }
 LEN_ORDER = ("short", "mid", "long", "epic")
 LANE_ORDER = ("next", "someday", "skip", "done")
-STAT_DIMS = ("gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year")
+WHERE_ORDER = ("deckonly", "mostdeck", "mostelse", "nodeck", "unstarted")
+STAT_DIMS = ("gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "where", "mc", "rv", "year")
 
 
 def _stat_row(key: Any, label: str) -> dict[str, Any]:
@@ -927,7 +941,7 @@ def name_groups(games: Iterable[Game], field_: str) -> dict[str, dict[str, Any]]
 def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[Game], str] | None = None,
               pub_labels: Mapping[str, str] | None = None, dev_labels: Mapping[str, str] | None = None,
               tag_labels: Mapping[str, str] | None = None) -> dict:
-    """The page's statsFor(): ``{"tiles": {...}, "dims": {gen, pub, dev, tag, deck, pt, ctrl, len, lane, mc, rv, year}}``
+    """The page's statsFor(): ``{"tiles": {...}, "dims": {gen, pub, dev, tag, deck, pt, ctrl, len, lane, where, mc, rv, year}}``
     with the same camelCase keys; json.dumps of it equals JSON.stringify of the page's result."""
     dsrc = dsrc if dsrc in SRCS else "main"
     lane_fn = lane_of if callable(lane_of) else (lambda _g: "")
@@ -957,7 +971,7 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
             unknown[d] = _stat_row(key, label)
         bump(unknown[d], g, st)  # type: ignore[arg-type]
 
-    tiles: dict[str, Any] = {"games": len(games), "minutes": 0, "deckMinutes": 0, "never": 0, "tried": 0,
+    tiles: dict[str, Any] = {"games": len(games), "minutes": 0, "deckMinutes": 0, "deckGames": 0, "never": 0, "tried": 0,
                              "played": 0, "backlogGames": 0, "backlogWithTime": 0, "backlogHours": 0,
                              "mcMedian": None, "mcCount": 0, "rvMedian": None, "rvCount": 0}
     mcs: list[float] = []
@@ -966,6 +980,8 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
         st, ln = play_state(g), lane_fn(g) or ""
         tiles["minutes"] += g.playtime
         tiles["deckMinutes"] += g.deck_playtime
+        if g.deck_playtime > 0:
+            tiles["deckGames"] += 1
         tiles[st] += 1
         if st != "played" and ln not in ("skip", "done"):
             tiles["backlogGames"] += 1
@@ -1032,6 +1048,9 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
             put("lane", ln, STAT_LABELS["lane"].get(ln, ln), g, st)
         else:
             unk("lane", "none", STAT_LABELS["lane"]["none"], g, st)
+        wk = where_key(g)
+        known["where"] += 1
+        put("where", wk, STAT_LABELS["where"][wk], g, st)
         mb = mc_bucket(g)
         if mb:
             known["mc"] += 1
@@ -1066,6 +1085,7 @@ def stats_for(games: Sequence[Game], *, dsrc: str = "main", lane_of: Callable[[G
     out["ctrl"] = {"rows": ordered("ctrl", CTRLS)}
     out["len"] = {"rows": ordered("len", LEN_ORDER)}
     out["lane"] = {"rows": ordered("lane", LANE_ORDER)}
+    out["where"] = {"rows": ordered("where", WHERE_ORDER)}
     out["mc"] = {"rows": ordered("mc", [b[0] for b in MC_BUCKETS])}
     out["rv"] = {"rows": ordered("rv", REVIEW_KEYS)}
     yrows: list[dict[str, Any]] = []
@@ -1375,7 +1395,7 @@ def next_queue_out(snap: Snapshot) -> dict[str, Any]:
 
 
 _STAT_DIM = {"genre": "gen", "publisher": "pub", "developer": "dev", "tags": "tag", "deck": "deck", "protondb": "pt",
-             "controller": "ctrl", "length": "len", "lane": "lane", "metacritic": "mc", "reviews": "rv",
+             "controller": "ctrl", "length": "len", "lane": "lane", "where_played": "where", "metacritic": "mc", "reviews": "rv",
              "year": "year", "decade": "year"}
 
 

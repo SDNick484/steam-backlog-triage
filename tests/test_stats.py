@@ -241,6 +241,7 @@ class StatsFor(unittest.TestCase):
         self.assertEqual(t["games"], 40)
         self.assertEqual(t["minutes"], sum(x["playtime"] for x in g))
         self.assertEqual(t["deckMinutes"], sum(x.get("deckPlaytime", 0) for x in g))
+        self.assertEqual(t["deckGames"], sum(1 for x in g if x.get("deckPlaytime", 0) > 0))
         for st in ("never", "tried", "played"):
             self.assertEqual(t[st], sum(1 for x in g if pstate(x) == st), st)
         self.assertEqual(t["never"] + t["tried"] + t["played"], 40)
@@ -305,6 +306,10 @@ class StatsFor(unittest.TestCase):
     def test_pinned_literals(self):
         # Worked out once from tests/fixtures/stats_library.json; a change here is a change in meaning.
         t, dims = self.stats["tiles"], self.stats["dims"]
+        self.assertEqual(t["deckGames"], 6)
+        self.assertEqual([(r["key"], r["n"]) for r in dims["where"]["rows"]],
+                         [("mostdeck", 2), ("mostelse", 4), ("nodeck", 24), ("unstarted", 10)])
+        self.assertIsNone(dims["where"]["unknown"])
         self.assertEqual({k: t[k] for k in ("minutes", "deckMinutes", "never", "tried", "played", "backlogGames",
                                             "backlogWithTime", "backlogHours", "mcMedian", "mcCount", "rvMedian", "rvCount")},
                          {"minutes": 9460, "deckMinutes": 1979, "never": 10, "tried": 17, "played": 13,
