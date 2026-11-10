@@ -149,6 +149,13 @@ table.heat{border-collapse:separate;border-spacing:3px;width:100%;min-width:440p
 .lenbar .track span{height:100%;background:var(--accent)}
 .lenbar .track span.x{background:color-mix(in oklab,var(--accent) 45%,var(--surface-2))}
 .lenbar small{font-size:12px;color:var(--muted)}
+#contSec{display:flex;flex-direction:column;gap:14px}
+#contSec[hidden]{display:none}
+.cont-of{font-size:13.5px;color:var(--ink-2)}
+.cont-bar{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.cont-bar span{display:block;height:100%;background:var(--accent)}
+.cont-share{display:flex;flex-direction:column;gap:4px}
+.cont-share small{font-size:12px;color:var(--muted)}
 
 .ask{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px}
 .ask form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
@@ -237,7 +244,7 @@ input::placeholder{color:var(--muted)}
 .wrap[data-mode="stats"] .only-list{display:none!important}
 .wrap:not([data-mode="stats"]) .only-stats{display:none!important}
 /* Ask view: only the header and the thread */
-.wrap[data-mode="ask"] .overview,.wrap[data-mode="ask"] #picksSec,.wrap[data-mode="ask"] #howto,.wrap[data-mode="ask"] #allSec{display:none!important}
+.wrap[data-mode="ask"] .overview,.wrap[data-mode="ask"] #contSec,.wrap[data-mode="ask"] #picksSec,.wrap[data-mode="ask"] #howto,.wrap[data-mode="ask"] #allSec{display:none!important}
 .wrap:not([data-mode="ask"]) .only-ask{display:none!important}
 .only-stats{display:flex;flex-direction:column;gap:14px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px}
@@ -372,6 +379,16 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
       </div>
       <div class="heat-wrap"><table class="heat" id="heat"></table></div>
     </div>
+  </section>
+
+  <section class="only-list" id="contSec" aria-labelledby="contH" hidden>
+    <div class="section-head">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <h2 id="contH">Continue</h2>
+        <p class="sub">Games you have started, haven't finished and played in the last year, most recent first. It follows your filters.</p>
+      </div>
+    </div>
+    <div class="picks" id="cont"></div>
   </section>
 
   <section class="only-list" id="picksSec" style="display:flex;flex-direction:column;gap:14px" aria-labelledby="picksH">
@@ -1245,6 +1262,7 @@ function render() {
   if (MODE === "ask") { renderChat(); return; }
   if (MODE === "stats") { renderStats(); return; }
   renderOverview();
+  renderContinue();
   renderPicks();
   renderAsk();
   renderList();
@@ -1392,6 +1410,27 @@ function passes(g) {
   if (f.prog.length && !f.prog.some((k) => progMatch(g, k))) return false;
   if (f.notes && (f.notes === "yes") !== S.notes.has(g.appid)) return false;
   return true;
+}
+
+// The "Continue" shelf: in-progress games that pass the filter panel (not the view or the search box, like the picks),
+// most recently played first. Hidden when there are none, so an export without play data shows no shelf.
+const CONT_MAX = 6;
+function contCard(g) {
+  const share = g.playtime > 0 ? Math.min(100, Math.max(0, Math.round((g.deckPlaytime / g.playtime) * 100))) : 0;
+  return `<article class="pick cont">
+    <div class="pick-top"><span class="rank">${esc(ago(g.lastPlayed))}</span>${deckBadge(g.deck)}</div>
+    <h3><a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${esc(g.name)}</a></h3>
+    <p class="cont-of num">${esc(fmtMin(g.playtime))} of ~${esc(fmtH(mainH(g)))} h</p>
+    <div class="cont-share"><div class="cont-bar" role="img" aria-label="${share}% of playtime on Deck"><span style="width:${share}%"></span></div><small class="num">${share}% on Deck</small></div>
+    <div class="spacer"></div>
+    ${laneButtons(g, false)}
+  </article>`;
+}
+function renderContinue() {
+  const top = S.games.filter((g) => inProgress(g) && passes(g))
+    .sort((a, b) => b.lastPlayed - a.lastPlayed || a.name.localeCompare(b.name)).slice(0, CONT_MAX);
+  $("contSec").hidden = !top.length;
+  $("cont").innerHTML = top.map(contCard).join("");
 }
 
 function renderPicks() {
