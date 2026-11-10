@@ -223,7 +223,7 @@ What each part checks:
 - **Installer test** runs `install/alpine.sh` in `python:3.12-alpine` twice (and a third time with one option changed): `~/.steam-env`, `ask.env` and the saved options are kept, the Ask modules are installed and import, there is exactly one `BEGIN`/`END` cron block, and unrelated cron lines survive.
 - **MCP contract tests**: CI checks out [`mcp-server-steam-backlog`](https://github.com/SDNick484/mcp-server-steam-backlog) at a pinned commit and runs its `tests/test_contract.py` against this checkout's server (`BACKLOG_CHECKOUT`, `BACKLOG_REQUIRE_REAL=1`). A weekly run does the same against that repo's `main`. Bump `MCP_PINNED_REF` in `.github/workflows/ci.yml` when the contract changes.
 
-CI runs on pushes to `main`, pull requests, weekly, and on demand. The unit tests run on Python 3.11 to 3.14; the other jobs use one version. Every third-party action is pinned to a full commit SHA with its version in a comment, and Dependabot updates them weekly.
+CI runs on pushes to `main`, pull requests, weekly, and on demand. The unit tests run on Python 3.11 to 3.14; the other jobs use one version. Every third-party action is pinned to a full commit SHA with its version in a comment, and Dependabot updates them weekly, along with the test-only Playwright pin in `tests/browser/requirements.txt`.
 
 ### Privacy scan
 

@@ -12,3 +12,14 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  # Playwright is the only pip dependency, and it is test-only (tests/browser/requirements.txt). The product
+  # itself is standard library only, so nothing here is ever installed on a server.
+  - package-ecosystem: pip
+    directory: /tests/browser
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      browser-tests:
+        patterns: ["*"]
