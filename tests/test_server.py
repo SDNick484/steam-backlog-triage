@@ -743,7 +743,8 @@ class ReadmeRouteTable(unittest.TestCase):
         covered = {("GET", "/"), ("GET", "/stats"), ("GET", "/api/library"), ("PUT", "/api/library"), ("GET", "/api/triage"),
                    ("PUT", "/api/triage"), ("GET", "/api/notes"), ("PUT", "/api/notes"), ("GET", "/api/order"),
                    ("PUT", "/api/order"), ("GET", "/healthz"),
-                   ("POST", "/api/export"), ("GET", "/api/export/status")}  # the last two: test_export_endpoints.py
+                   ("POST", "/api/export"), ("GET", "/api/export/status"),  # these two: test_export_endpoints.py
+                   ("GET", "/api/run-status")}  # test_hardening.py
         self.assertEqual(set(self.routes()), covered)
 
 

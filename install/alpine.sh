@@ -65,6 +65,7 @@ BUILD=$(git -C "$SRC" -c safe.directory="$SRC" rev-parse --short HEAD 2>/dev/nul
 case "$BUILD" in
   ""|*[!0-9a-f]*) BUILD="" ;;
 esac
+# shellcheck disable=SC2016  # the $ in the patterns below is literal: it is the placeholder's own
 if [ -n "$BUILD" ]; then
   sed -i "s/^BUILD_STAMP = \"\$Format:%h\$\"\$/BUILD_STAMP = \"$BUILD\"/" "$PREFIX/backlog_server.py"
   echo "Build $BUILD"

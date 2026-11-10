@@ -147,6 +147,7 @@ cp "$LR" "$STUBS/lr.first"
 
 # ---- build stamp: the installed server is stamped from git; the checkout is not
 check "the installed server is stamped with the short commit" grep -qx 'BUILD_STAMP = "abc1234"' "$PREFIX/backlog_server.py"
+# shellcheck disable=SC2016  # the $ is literal: it is the placeholder's own
 check "the checkout's server still has the placeholder" grep -q '^BUILD_STAMP = "\$Format:%h\$"$' "$SRC/backlog_server.py"
 check "the installed server reports that build" sh -c "cd '$PREFIX' && test \"\$(python3 -c 'import backlog_server as b; print(b.build_id())')\" = abc1234"
 
