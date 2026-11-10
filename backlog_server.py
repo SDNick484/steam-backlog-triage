@@ -13,6 +13,8 @@ Standard library only. Serves:
   GET  /api/notes       {appid: note} for per-game notes
   PUT  /api/notes       {"appid": 620, "note": "..."}  ("" clears; max 2000 characters)
   GET  /api/order       [appid, ...] order of the Up next lane
+  GET  /api/history     {"days": [...], "lanes": [...]}: one row of counts per day (history.jsonl) and every
+                        lane change (lane_log.jsonl), oldest first; read-only, the server writes both files
   PUT  /api/order       {"order": [620, 1145360, ...]}  (a list of distinct app ids)
   POST /api/export      start a library export (run-export.sh) in the background
   GET  /api/export/status   the running or last export: state, phase, progress, recent log lines
@@ -24,12 +26,14 @@ Standard library only. Serves:
   GET  /healthz?deep=1  200 or 503 and {"ok", "build", "last_ok", "age_seconds", "consecutive_failures"}:
                         unhealthy when the last export failed or the last success is over 10 days old
 
-Notes and order live in notes.json and order.json next to triage.json.
+Notes and order live in notes.json and order.json next to triage.json. History lives beside them:
+lane_log.jsonl gets one line for every lane change that reaches the server (the page's or anyone else's),
+and history.jsonl one row per local day, written after a lane change and after a new library appears.
 
 Every response carries X-Backlog-Server: 1 and X-Backlog-Api: 2 (the API version), plus
 X-Content-Type-Options: nosniff, Referrer-Policy: same-origin and Content-Security-Policy: frame-ancestors
 'none'. PUT, POST and DELETE answer 403 to a request the browser marks as cross-site. GET
-/api/library, /api/triage, /api/notes and /api/order send an ETag and honor If-None-Match,
+/api/library, /api/triage, /api/notes, /api/order and /api/history send an ETag and honor If-None-Match,
 answering 304 when it still matches. Their PUTs honor an optional If-Match (412 if the
 resource changed since that ETag) and return the previous value; with no If-Match they
 behave as they always did.
@@ -200,6 +204,29 @@ class History:
             os.close(fd)
         self._lane_lines += 1
         return True
+
+    @staticmethod
+    def _objects(path: str, need: str) -> list[dict]:
+        """The JSON objects in a JSONL file that carry the key `need`, in file order. Missing or unreadable
+        files and lines that aren't such objects give nothing."""
+        out: list[dict] = []
+        try:
+            with open(path, encoding="utf-8") as f:
+                for text in f:
+                    try:
+                        r = json.loads(text)
+                    except ValueError:
+                        continue
+                    if isinstance(r, dict) and need in r:
+                        out.append(r)
+        except OSError:
+            pass
+        return out
+
+    def read(self) -> dict:
+        """What GET /api/history sends: {"days": history rows oldest first, "lanes": lane changes, oldest
+        first}. Call with App.lock held so the two files agree with each other."""
+        return {"days": self._objects(self.days_path, "date"), "lanes": self._objects(self.lane_path, "ts")}
 
     def record_day(self, row: dict) -> None:
         """Make `row` today's row in history.jsonl: replace the row for today's local date if there is one,
@@ -400,6 +427,9 @@ class App:
 
     def read_order(self) -> list:
         return read_json(self.order, [])
+
+    def read_history(self) -> dict:
+        return self.history.read()
 
     def read_run_status(self) -> dict | None:
         """run_status.json as the exporter wrote it, checked for shape; None if absent or not that shape."""
@@ -885,6 +915,8 @@ def make_handler(app: App):
                 return self.small_resource(app.read_notes)
             if path == "/api/order":
                 return self.small_resource(app.read_order)
+            if path == "/api/history":
+                return self.small_resource(app.read_history)
             if path == "/api/export/status":
                 return self.export_status()
             if path == "/api/ask/status":

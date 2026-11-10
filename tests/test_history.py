@@ -587,5 +587,90 @@ class HistoryHttp(unittest.TestCase):
         self.assertEqual(len(read_lines(s.data / "lane_log.jsonl")), 20)
 
 
+# ====================================================================== C3: GET /api/history
+
+class HistoryRoute(unittest.TestCase):
+    def start(self, **kw) -> Server:
+        s = Server(**kw)
+        self.addCleanup(s.cleanup)
+        return s.start()
+
+    def test_before_anything_has_happened_both_lists_are_empty(self):
+        r = self.start().get("/api/history")
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.json(), {"days": [], "lanes": []})
+        self.assertEqual(r.headers.get("content-type"), "application/json")
+
+    def test_it_returns_the_day_rows_and_the_lane_changes_in_file_order(self):
+        s = self.start()
+        s.put("/api/triage", {"appid": 1001, "lane": "next"})
+        s.put("/api/triage", {"appid": 1001, "lane": "done"})
+        body = s.get("/api/history").json()
+        self.assertEqual(list(body), ["days", "lanes"])
+        self.assertEqual(body["days"], history_rows(s.data / "history.jsonl"))
+        self.assertEqual(body["days"][0]["laneCounts"]["done"], 1)
+        lanes = body["lanes"]
+        self.assertEqual([(x["appid"], x["from"], x["to"]) for x in lanes], [(1001, "", "next"), (1001, "next", "done")])
+        self.assertTrue(all(isinstance(x["ts"], int) for x in lanes))
+
+    def test_lines_that_are_not_json_objects_are_left_out(self):
+        s = self.start()
+        (s.data / "lane_log.jsonl").write_text('{"ts":1,"appid":5,"from":"","to":"done"}\nnot json\n[1]\n\n')
+        (s.data / "history.jsonl").write_text('{"date":"2026-01-01","games":1}\n42\n{broken\n')
+        body = s.get("/api/history").json()
+        self.assertEqual(body["lanes"], [{"ts": 1, "appid": 5, "from": "", "to": "done"}])
+        self.assertEqual(body["days"], [{"date": "2026-01-01", "games": 1}])
+
+    def test_it_carries_an_etag_and_a_matching_request_gets_304(self):
+        s = self.start()
+        s.put("/api/triage", {"appid": 1001, "lane": "next"})
+        first = s.get("/api/history")
+        etag = first.headers.get("etag")
+        self.assertRegex(etag, r'^"[0-9a-f]{32}"$')
+        again = s.get("/api/history", headers={"If-None-Match": etag})
+        self.assertEqual(again.status, 304)
+        self.assertEqual(again.body, b"")
+        self.assertEqual(again.headers.get("etag"), etag)
+        self.assertEqual(s.get("/api/history", headers={"If-None-Match": "W/" + etag}).status, 304)
+        self.assertEqual(s.get("/api/history", headers={"If-None-Match": '"other"'}).status, 200)
+
+    def test_a_lane_change_changes_the_etag_and_a_no_op_does_not(self):
+        s = self.start()
+        s.put("/api/triage", {"appid": 1001, "lane": "next"})
+        before = s.get("/api/history").headers["etag"]
+        s.put("/api/triage", {"appid": 1001, "lane": "next"})
+        self.assertEqual(s.get("/api/history").headers["etag"], before)
+        s.put("/api/triage", {"appid": 1001, "lane": "done"})
+        self.assertNotEqual(s.get("/api/history").headers["etag"], before)
+
+    def test_it_is_additive_the_api_version_stays_2(self):
+        r = self.start().get("/api/history")
+        self.assertEqual(r.headers.get("x-backlog-api"), "2")
+        self.assertEqual(backlog_server.API_VERSION, "2")
+
+    def test_it_is_read_only(self):
+        s = self.start()
+        for method in ("PUT", "POST", "DELETE"):
+            r = s.req(method, "/api/history", {"days": []})
+            self.assertGreaterEqual(r.status, 400, method)
+        self.assertFalse((s.data / "history.jsonl").exists())
+
+    def test_head_has_the_headers_and_no_body(self):
+        s = self.start()
+        r = s.req("HEAD", "/api/history")
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.body, b"")
+
+    def test_the_security_headers_are_on_it(self):
+        r = self.start().get("/api/history")
+        self.assertEqual(r.headers.get("x-content-type-options"), "nosniff")
+        self.assertEqual(r.headers.get("cache-control"), "no-store")
+
+    def test_a_directory_in_place_of_a_file_reads_as_empty_not_an_error(self):
+        s = self.start()
+        (s.data / "history.jsonl").mkdir()
+        self.assertEqual(s.get("/api/history").json(), {"days": [], "lanes": []})
+
+
 if __name__ == "__main__":
     unittest.main()
