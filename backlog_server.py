@@ -89,6 +89,7 @@ SHOWN_LINES = 20                # ...of which the status object carries the last
 LINE_MAX = 300
 STALE_SECONDS = 10 * 86400      # a library older than this is stale: the banner and the deep health check say so
 ERROR_CLASSES = ("steam", "hltb", "details", "other")  # run_status.json's error_class, besides null
+LANE_LOG_MAX = 50_000           # lines kept in lane_log.jsonl; the oldest go first
 
 # The short commit this code came from. .gitattributes marks this file export-subst, so `git archive` fills the
 # placeholder in; install/alpine.sh stamps the installed copy from `git rev-parse --short HEAD`. Anywhere it is
@@ -148,6 +149,56 @@ def etag_of(body: bytes) -> str:
     return '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
 
 
+def local_now() -> datetime.datetime:
+    """The server's local time, timezone-aware. The history's day boundary is this clock's midnight."""
+    return datetime.datetime.now().astimezone()
+
+
+class History:
+    """The server-owned history files in the data directory: lane_log.jsonl (one line per lane change that
+    reached the server, whoever sent it) and, below it, history.jsonl (one row per local day).
+
+    Not thread-safe by itself. App.lock, the lock every writer of triage.json takes, is held around each call, so
+    a lane change and the log line for it are one step. `now` is the clock (tests set it); `lane_max` is the
+    line cap. Callers treat OSError as "history is unavailable": the person's own write always comes first."""
+
+    def __init__(self, data_dir: str, now=None, lane_max: int = LANE_LOG_MAX):
+        self.lane_path = os.path.join(data_dir, "lane_log.jsonl")
+        self.now = now or local_now
+        self.lane_max = lane_max
+        self._lane_lines: int | None = None  # lines in lane_log.jsonl; counted on the first write, then kept
+
+    def _read_lane_lines(self) -> list[str]:
+        try:
+            with open(self.lane_path, encoding="utf-8") as f:
+                return [x for x in f.read().splitlines() if x.strip()]
+        except FileNotFoundError:
+            return []
+
+    def log_lane(self, appid: int, old: str, new: str) -> bool:
+        """Append {ts, appid, from, to}; ts is UTC epoch seconds, "" means no lane. Returns False, writing
+        nothing, when the lane did not change. Past `lane_max` lines the oldest are dropped, by rewriting the
+        file with atomic_write."""
+        if old == new:
+            return False
+        line = json.dumps({"ts": int(self.now().timestamp()), "appid": appid, "from": old, "to": new},
+                          separators=(",", ":"))
+        if self._lane_lines is None:
+            self._lane_lines = len(self._read_lane_lines())
+        if self._lane_lines + 1 > self.lane_max:
+            keep = self._read_lane_lines()[-(self.lane_max - 1):] if self.lane_max > 1 else []
+            atomic_write(self.lane_path, ("\n".join([*keep, line]) + "\n").encode())
+            self._lane_lines = len(keep) + 1
+            return True
+        fd = os.open(self.lane_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, (line + "\n").encode())
+        finally:
+            os.close(fd)
+        self._lane_lines += 1
+        return True
+
+
 ETAG_TOKEN = re.compile(r'(?:W/)?"[^"]*"|\*')
 
 
@@ -172,7 +223,7 @@ def config_script(cfg: dict) -> str:
 
 
 class App:
-    def __init__(self, page: str, data_dir: str, nav: list[dict]):
+    def __init__(self, page: str, data_dir: str, nav: list[dict], now=None):
         self.page = page
         self.data_dir = os.path.abspath(data_dir)
         self.library = os.path.join(data_dir, "steam_backlog.json")
@@ -181,6 +232,7 @@ class App:
         self.order = os.path.join(data_dir, "order.json")
         self.head = SKELETON_HEAD.replace("{config}", config_script({"nav": nav}))
         self.lock = threading.Lock()
+        self.history = History(self.data_dir, now)
         # The library is 1-2 MB, so its ETag is remembered per (inode, mtime, size). Every writer
         # replaces the file atomically (new inode), which makes that key safe.
         self._lib_mu = threading.Lock()
@@ -243,6 +295,14 @@ class App:
             notes=ids(notes),
             order=[a for a in order if is_app_id(a)] if isinstance(order, list) else [],
             exported_at=cached[2])
+
+    def note_lane_change(self, appid: int, previous: str, lane: str) -> None:
+        """Log a lane change, with self.lock held. Best effort: a history that can't be written is reported on
+        stderr and never fails the triage write the person just made."""
+        try:
+            self.history.log_lane(appid, previous, lane)
+        except OSError as e:
+            sys.stderr.write(f"history: could not write lane_log.jsonl: {e}\n")
 
     def page_bytes(self) -> bytes:
         with open(self.page, "rb") as f:
@@ -785,6 +845,7 @@ def make_handler(app: App):
                         else:
                             t.pop(str(appid), None)
                         atomic_write(app.triage, json.dumps(t, separators=(",", ":")).encode())
+                        app.note_lane_change(appid, previous, lane)
                         new_etag = etag_of(dump(t))
                 if stale:
                     return self.precondition_failed(current)
