@@ -21,8 +21,9 @@ env:
   # The MCP server repo (SDNick484/mcp-server-steam-backlog) holds the contract tests that run against this
   # repo's backlog_server.py. Pinned to a commit so a change over there can't turn this repo's CI red on its own;
   # the weekly run (contract-against-mcp-main) checks the moving target. Bump it when the contract changes.
+  # Currently b8e29c7: MCP main after PR #6 (contract section 6.7, store tags).
   MCP_REPO: SDNick484/mcp-server-steam-backlog
-  MCP_PINNED_REF: 3aff996ac6c0f61a6c4dad5535d7f989ebdbd347
+  MCP_PINNED_REF: b8e29c7a88dbdf2d327c900047fb881768e1a0f9
 
 jobs:
   # Server routes, export endpoints, the exporter against a mock Steam, run-export.sh, the privacy scanner's own
