@@ -580,6 +580,14 @@ def make_handler(app: App):
                 return self.json(501, {"error": "export not configured on this server"})
             self.json(200, app.exporter.status())
 
+        def refuse_cross_site(self) -> bool:
+            """Answer 403 and return True when the browser says another site sent this request."""
+            if not ask.cross_site_request(self.headers):
+                return False
+            self.drain_body()
+            self.json(403, {"error": "cross-site request refused"})
+            return True
+
         def ask_post(self) -> None:
             try:
                 n = int(self.headers.get("Content-Length") or 0)
@@ -596,7 +604,9 @@ def make_handler(app: App):
         def do_POST(self):
             path = self.path.split("?", 1)[0]
             if path == "/api/ask":
-                return self.ask_post()
+                return self.ask_post()  # Ask runs the same cross-site check as its first step
+            if self.refuse_cross_site():
+                return
             if path != "/api/export":
                 self.drain_body()
                 return self.json(404, {"error": "not found"})
@@ -670,8 +680,15 @@ def make_handler(app: App):
 
         do_HEAD = do_GET
 
+        def do_DELETE(self):
+            if self.refuse_cross_site():
+                return
+            self.send_error(501, "Unsupported method ('DELETE')")
+
         def do_PUT(self):
             path = self.path.split("?", 1)[0]
+            if self.refuse_cross_site():
+                return
             try:
                 data = self.body()
             except (ValueError, json.JSONDecodeError) as e:
