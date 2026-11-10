@@ -51,7 +51,8 @@ only to api.anthropic.com, and never logged or sent to the browser.
 Usage:
   backlog_server.py [--port 8484] [--bind 0.0.0.0] [--data DIR] [--page backlog.html]
                     [--nav "Deals=https://deals.example.com/"] ...
-                    [--export-cmd PATH] [--export-timeout SECONDS] [--ask-env PATH]
+                    [--export-cmd PATH] [--export-timeout SECONDS] [--library-poll SECONDS]
+                    [--ask-env PATH]
 """
 
 from __future__ import annotations
