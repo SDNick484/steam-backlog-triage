@@ -149,6 +149,13 @@ table.heat{border-collapse:separate;border-spacing:3px;width:100%;min-width:440p
 .lenbar .track span{height:100%;background:var(--accent)}
 .lenbar .track span.x{background:color-mix(in oklab,var(--accent) 45%,var(--surface-2))}
 .lenbar small{font-size:12px;color:var(--muted)}
+#contSec{display:flex;flex-direction:column;gap:14px}
+#contSec[hidden]{display:none}
+.cont-of{font-size:13.5px;color:var(--ink-2)}
+.cont-bar{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.cont-bar span{display:block;height:100%;background:var(--accent)}
+.cont-share{display:flex;flex-direction:column;gap:4px}
+.cont-share small{font-size:12px;color:var(--muted)}
 
 .ask{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px}
 .ask form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
@@ -237,7 +244,7 @@ input::placeholder{color:var(--muted)}
 .wrap[data-mode="stats"] .only-list{display:none!important}
 .wrap:not([data-mode="stats"]) .only-stats{display:none!important}
 /* Ask view: only the header and the thread */
-.wrap[data-mode="ask"] .overview,.wrap[data-mode="ask"] #picksSec,.wrap[data-mode="ask"] #howto,.wrap[data-mode="ask"] #allSec{display:none!important}
+.wrap[data-mode="ask"] .overview,.wrap[data-mode="ask"] #contSec,.wrap[data-mode="ask"] #picksSec,.wrap[data-mode="ask"] #howto,.wrap[data-mode="ask"] #allSec{display:none!important}
 .wrap:not([data-mode="ask"]) .only-ask{display:none!important}
 .only-stats{display:flex;flex-direction:column;gap:14px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px}
@@ -374,6 +381,16 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     </div>
   </section>
 
+  <section class="only-list" id="contSec" aria-labelledby="contH" hidden>
+    <div class="section-head">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <h2 id="contH">Continue</h2>
+        <p class="sub">Games you have started, haven't finished and played in the last year, most recent first. It follows your filters.</p>
+      </div>
+    </div>
+    <div class="picks" id="cont"></div>
+  </section>
+
   <section class="only-list" id="picksSec" style="display:flex;flex-direction:column;gap:14px" aria-labelledby="picksH">
     <div class="section-head">
       <div style="display:flex;flex-direction:column;gap:4px">
@@ -431,6 +448,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
           <option value="recent">Recently played</option>
           <option value="most">Most played</option>
           <option value="mc">Metacritic</option>
+          <option value="deckplay">Deck playtime</option>
         </select>
       </div>
     </div>
@@ -720,7 +738,12 @@ const STAT_LABELS = {
   ctrl: { full: "Full", partial: "Partial", none: "None listed" },
   len: { short: "Under 5 h", mid: "5–15 h", long: "15–40 h", epic: "40 h+" },
   lane: { none: "No lane", next: "Up next", someday: "Someday", skip: "Skipped", done: "Finished" },
+  where: { deckonly: "Deck only", mostdeck: "Mostly Deck", mostelse: "Mostly elsewhere", nodeck: "Never on Deck", unstarted: "Not played" },
 };
+// Where a game's playtime happened. Half or more on the Deck is "mostly Deck"; all of it is "Deck only".
+const WHERE_ORDER = ["deckonly", "mostdeck", "mostelse", "nodeck", "unstarted"];
+const whereKey = (g) => (g.playtime === 0 ? "unstarted" : g.deckPlaytime === 0 ? "nodeck" : g.deckPlaytime >= g.playtime ? "deckonly" :
+  g.deckPlaytime * 2 >= g.playtime ? "mostdeck" : "mostelse");
 const LEN_ORDER = ["short", "mid", "long", "epic"];
 const LANE_ORDER = ["next", "someday", "skip", "done"];
 const STAT_METRICS = ["games", "hours", "never"];
@@ -747,7 +770,7 @@ function statsFor(games, opts) {
   const tagLabels = o.tagLabels || new Map([...nameGroups(games, "tag")].map(([k, e]) => [k, e.label]));
   const row = (key, label) => ({ key, label, n: 0, minutes: 0, never: 0, tried: 0, played: 0 });
   const dims = {};
-  for (const d of ["gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "mc", "rv", "year"]) {
+  for (const d of ["gen", "pub", "dev", "tag", "deck", "pt", "ctrl", "len", "lane", "where", "mc", "rv", "year"]) {
     dims[d] = { rows: new Map(), unknown: null, known: 0, total: games.length };
   }
   const bump = (r, g, st) => { r.n++; r.minutes += g.playtime; r[st]++; };
@@ -757,12 +780,12 @@ function statsFor(games, opts) {
     bump(r, g, st);
   };
   const unk = (d, key, label, g, st) => { const dim = dims[d]; if (!dim.unknown) dim.unknown = row(key, label); bump(dim.unknown, g, st); };
-  const tiles = { games: games.length, minutes: 0, deckMinutes: 0, never: 0, tried: 0, played: 0,
+  const tiles = { games: games.length, minutes: 0, deckMinutes: 0, deckGames: 0, never: 0, tried: 0, played: 0,
                   backlogGames: 0, backlogWithTime: 0, backlogHours: 0, mcMedian: null, mcCount: 0, rvMedian: null, rvCount: 0 };
   const mcs = [], rvs = [];
   for (const g of games) {
     const st = playState(g), ln = laneOf(g) || "";
-    tiles.minutes += g.playtime; tiles.deckMinutes += g.deckPlaytime || 0; tiles[st]++;
+    tiles.minutes += g.playtime; tiles.deckMinutes += g.deckPlaytime || 0; if (g.deckPlaytime > 0) tiles.deckGames++; tiles[st]++;
     if (st !== "played" && ln !== "skip" && ln !== "done") {
       tiles.backlogGames++;
       const h = mainLen(g, dsrc);
@@ -784,6 +807,9 @@ function statsFor(games, opts) {
     const lb = lenBucketBy(g, dsrc);
     if (lb) { dims.len.known++; put("len", lb, STAT_LABELS.len[lb], g, st); } else unk("len", "none", "No HLTB time", g, st);
     if (ln) { dims.lane.known++; put("lane", ln, STAT_LABELS.lane[ln], g, st); } else unk("lane", "none", STAT_LABELS.lane.none, g, st);
+    const wk = whereKey(g);
+    dims.where.known++;
+    put("where", wk, STAT_LABELS.where[wk], g, st);
     const mb = mcBucket(g);
     if (mb) { dims.mc.known++; put("mc", mb, MC_BUCKETS.find((b) => b[0] === mb)[1], g, st); } else unk("mc", "", "Unknown", g, st);
     const rb = reviewBucket(g);
@@ -803,6 +829,7 @@ function statsFor(games, opts) {
   out.ctrl = { rows: ordered("ctrl", ["full", "partial", "none"]) };
   out.len = { rows: ordered("len", LEN_ORDER) };
   out.lane = { rows: ordered("lane", LANE_ORDER) };
+  out.where = { rows: ordered("where", WHERE_ORDER) };
   out.mc = { rows: MC_BUCKETS.map((b) => b[0]).filter((k) => dims.mc.rows.has(k)).map((k) => dims.mc.rows.get(k)) };
   out.rv = { rows: REVIEW_KEYS.filter((k) => dims.rv.rows.has(k)).map((k) => dims.rv.rows.get(k)) };
   const years = [...dims.year.rows.keys()];
@@ -863,9 +890,10 @@ const TIERS = ["native", "platinum", "gold", "silver", "bronze", "borked", "pend
 const CTRLS = ["full", "partial", "none"];
 const PLAYS = ["never", "tried", "played"];
 const LANE_F = ["none", "next", "someday", "skip", "done"];
+const PROGS = ["inprog", "deck", "unstarted", "deckonly", "mostdeck", "mostelse", "nodeck"];
 const SRCS = ["main", "extra", "complete"];
 const VIEWS = ["backlog", "next", "someday", "played", "closed", "all"];
-const SORTS = ["score", "short", "name", "recent", "most", "mc"];
+const SORTS = ["score", "short", "name", "recent", "most", "mc", "deckplay"];
 const MC_OPTS = [60, 70, 75, 80, 85, 90];
 const DEFAULT_F = {
   q: "", view: "backlog", sort: "score",
@@ -879,7 +907,7 @@ const DEFAULT_F = {
   tag: [], tagUnk: false,
   rv: [], rvUnk: false,
   unk: [],
-  play: [], lane: [], notes: "",
+  play: [], lane: [], notes: "", prog: [],
 };
 const numIn = (v, lo, hi) => {
   if (v === null || v === undefined || v === "") return null;
@@ -927,6 +955,7 @@ function clean(raw) {
   r.ctrlUnk = o.ctrlUnk === true;
   r.play = pickIn(o.play, PLAYS);
   r.lane = pickIn(o.lane, LANE_F);
+  r.prog = pickIn(o.prog, PROGS);
   r.notes = ["yes", "no"].includes(o.notes) ? o.notes : "";
   return r;
 }
@@ -993,7 +1022,7 @@ function activeCount() {
     f.dnone || f.dmin !== null || f.dmax !== null, f.pt.length > 0,
     f.mc !== null || f.mcmax !== null, f.ymin !== null || f.ymax !== null, f.ctrl.length > 0,
     f.pub.length > 0, f.dev.length > 0, f.tag.length > 0, f.rv.length > 0, f.unk.length > 0,
-    f.play.length > 0, f.lane.length > 0, f.notes !== "",
+    f.play.length > 0, f.lane.length > 0, f.notes !== "", f.prog.length > 0,
   ].filter(Boolean).length;
 }
 function apply() { S.shown = PAGE; saveFilters(); writeHash(); render(); }
@@ -1073,6 +1102,12 @@ function currentTriage() { return S.source === "db" || S.source === "server" ? S
 function lane(g) { return currentTriage().get(g.appid) || ""; }
 const isClosed = (g) => ["skip", "done"].includes(lane(g));
 const inBacklog = (g) => playState(g) !== "played" && !isClosed(g);
+// "In progress" is separate from the backlog view: launched, not closed, a known length, under 80% of it played, and
+// played within the last year. A game with no HLTB time is never in progress (unknown, not zero). Not part of the score.
+const PROG_RULE = { doneFrac: 0.8, recentDays: 365 };
+const inProgress = (g) => g.playtime > 0 && !isClosed(g) && !!mainH(g) && g.playtime < PROG_RULE.doneFrac * mainH(g) * 60 &&
+  g.lastPlayed > 0 && Date.now() / 1000 - g.lastPlayed <= PROG_RULE.recentDays * 86400;
+const progMatch = (g, k) => (k === "inprog" ? inProgress(g) : k === "deck" ? g.deckPlaytime > 0 : whereKey(g) === k);
 
 function score(g) {
   let s = 0;
@@ -1236,6 +1271,7 @@ function render() {
   if (MODE === "ask") { renderChat(); return; }
   if (MODE === "stats") { renderStats(); return; }
   renderOverview();
+  renderContinue();
   renderPicks();
   renderAsk();
   renderList();
@@ -1380,8 +1416,30 @@ function passes(g) {
   }
   if (f.play.length && !f.play.includes(playState(g))) return false;
   if (f.lane.length && !f.lane.includes(lane(g) || "none")) return false;
+  if (f.prog.length && !f.prog.some((k) => progMatch(g, k))) return false;
   if (f.notes && (f.notes === "yes") !== S.notes.has(g.appid)) return false;
   return true;
+}
+
+// The "Continue" shelf: in-progress games that pass the filter panel (not the view or the search box, like the picks),
+// most recently played first. Hidden when there are none, so an export without play data shows no shelf.
+const CONT_MAX = 6;
+function contCard(g) {
+  const share = g.playtime > 0 ? Math.min(100, Math.max(0, Math.round((g.deckPlaytime / g.playtime) * 100))) : 0;
+  return `<article class="pick cont">
+    <div class="pick-top"><span class="rank">${esc(ago(g.lastPlayed))}</span>${deckBadge(g.deck)}</div>
+    <h3><a href="https://store.steampowered.com/app/${g.appid}/" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${esc(g.name)}</a></h3>
+    <p class="cont-of num">${esc(fmtMin(g.playtime))} of ~${esc(fmtH(mainH(g)))} h</p>
+    <div class="cont-share"><div class="cont-bar" role="img" aria-label="${share}% of playtime on Deck"><span style="width:${share}%"></span></div><small class="num">${share}% on Deck</small></div>
+    <div class="spacer"></div>
+    ${laneButtons(g, false)}
+  </article>`;
+}
+function renderContinue() {
+  const top = S.games.filter((g) => inProgress(g) && passes(g))
+    .sort((a, b) => b.lastPlayed - a.lastPlayed || a.name.localeCompare(b.name)).slice(0, CONT_MAX);
+  $("contSec").hidden = !top.length;
+  $("cont").innerHTML = top.map(contCard).join("");
 }
 
 function renderPicks() {
@@ -1422,6 +1480,7 @@ function filtered() {
     recent: (a, b) => b.lastPlayed - a.lastPlayed,
     most: (a, b) => b.playtime - a.playtime,
     mc: (a, b) => (b.metacritic || 0) - (a.metacritic || 0),
+    deckplay: (a, b) => b.deckPlaytime - a.deckPlaytime,
   }[f.sort] || ((a, b) => score(b) - score(a));
   return out.sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
 }
@@ -1506,6 +1565,8 @@ function renderPanel() {
   parts.push(fgroup("Deck status", segHtml("deck", DECK_ORDER.map((d) => [String(d), DECK[d].label]))));
   parts.push(fgroup("Controller support", segHtml("ctrl", [["full", "Full"], ["partial", "Partial"], ["none", "None listed"]]), "ctrlUnk", "ctrl"));
   parts.push(fgroup("Play state", segHtml("play", [["never", "Never launched"], ["tried", "Tried (under 2h)"], ["played", "Played 2h+"]])));
+  parts.push(fgroup("Progress", segHtml("prog", [["inprog", "In progress"], ["deck", "Started on Deck"], ["unstarted", "Not started"]])));
+  parts.push(fgroup("Where played", segHtml("prog", [["deckonly", "Deck only"], ["mostdeck", "Mostly Deck"], ["mostelse", "Mostly elsewhere"], ["nodeck", "Never on Deck"]])));
   parts.push(fgroup("Triage lane", segHtml("lane", [["none", "No lane"], ["next", "Up next"], ["someday", "Someday"], ["skip", "Skipped"], ["done", "Finished"]])));
   if (canEdit()) {
     parts.push(fgroup("Notes",
@@ -1576,6 +1637,7 @@ const STAT_CARDS = [
   { d: "ctrl", title: "Controller support", noun: "Controller support" },
   { d: "len", title: "Length (HowLongToBeat)", noun: "Length" },
   { d: "lane", title: "Triage lane", noun: "Triage lane" },
+  { d: "where", title: "Where played", noun: "Where played" },
   { d: "mc", title: "Metacritic", noun: "Metacritic" },
   { d: "rv", title: "Steam user reviews", noun: "Steam reviews" },
   { d: "year", title: "Release year", noun: "Release year", wide: true },
@@ -1675,6 +1737,8 @@ function renderStats() {
   $("statTiles").innerHTML = [
     tileHtml("Games in this view", nf(n), n !== S.games.length ? `of ${nf(S.games.length)} in the library` : ""),
     tileHtml("Time played", fmtHours(t.minutes / 60), `${fmtHours(t.deckMinutes / 60)} on the Deck`),
+    tileHtml("Played on Deck", `${nf(t.deckGames)} ${t.deckGames === 1 ? "game" : "games"}`,
+      `${fmtHours(t.deckMinutes / 60)}, ${t.minutes ? Math.round((100 * t.deckMinutes) / t.minutes) : 0}% of all playtime`),
     tileHtml("Never launched", nf(t.never), pct(t.never) + " of the games"),
     tileHtml("Tried (under 2 h)", nf(t.tried), pct(t.tried) + " of the games"),
     tileHtml("Played 2 h or more", nf(t.played), pct(t.played) + " of the games"),
@@ -1685,7 +1749,7 @@ function renderStats() {
   ].join("");
   $("statCards").innerHTML = STAT_CARDS.map((c) => {
     const dim = S.stats.dims[c.d];
-    const cov = c.d === "lane" ? `Triaged: ${nf(dim.known)} of ${nf(dim.total)}` : `${c.noun} known for ${nf(dim.known)} of ${nf(dim.total)}`;
+    const cov = c.d === "lane" ? `Triaged: ${nf(dim.known)} of ${nf(dim.total)}` : c.d === "where" ? `Launched: ${nf(dim.total - ((dim.rows.find((r) => r.key === "unstarted") || { n: 0 }).n))} of ${nf(dim.total)}` : `${c.noun} known for ${nf(dim.known)} of ${nf(dim.total)}`;
     const plural = c.plural || c.title.toLowerCase() + "s";
     const search = c.search ? `<input type="search" data-sq="${c.d}" placeholder="Search ${plural}" value="${esc(S.statQ[c.d])}" autocomplete="off" aria-label="Search ${plural}">` : "";
     const yearTools = c.d === "year"
@@ -1723,6 +1787,7 @@ function rowFilter(dim, key, unknown, step) {
     case "pt": f.pt = [key]; f.ptUnk = false; noUnk("pt"); break;
     case "ctrl": f.ctrl = [key]; f.ctrlUnk = false; noUnk("ctrl"); break;
     case "lane": f.lane = [key]; break;
+    case "where": f.prog = [key]; break;
     case "rv": f.rv = [key]; f.rvUnk = false; noUnk("rv"); break;
     case "len":
       f.durUnk = false;

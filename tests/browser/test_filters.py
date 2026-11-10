@@ -206,5 +206,138 @@ class Filters(unittest.TestCase):
         self.assertEqual(self.problems, [])
 
 
+def fresh_library(drop=()):
+    """The fixture with lastPlayed moved to recent dates (days ago: 5, 19, 33, ... so the oldest are past a year), and
+    the fields named in `drop` removed from every game."""
+    import time
+    now = time.time()
+    lib = json.loads(json.dumps(LIB))
+    k = 0
+    for g in lib["games"]:
+        if g.get("lastPlayed"):
+            g["lastPlayed"] = int(now - (k * 14 + 5) * 86400)
+            k += 1
+        for f in drop:
+            g.pop(f, None)
+    return lib
+
+
+def expected_continue(lib):
+    """Plain Python restatement of the rule, newest first, at most 6 (no lanes are set on the served library)."""
+    import time
+    now = time.time()
+    out = []
+    for g in lib["games"]:
+        h = (g.get("hltb") or {}).get("main") or (g.get("hltb") or {}).get("extra")
+        pt, lp = g.get("playtime") or 0, g.get("lastPlayed") or 0
+        if pt > 0 and h and pt < 0.8 * h * 60 and lp > 0 and now - lp <= 365 * 86400:
+            out.append((lp, g["name"]))
+    return [n for _, n in sorted(out, key=lambda t: (-t[0], t[1]))][:6]
+
+
+@unittest.skipIf(sync_playwright is None and not REQUIRE, "playwright is not installed")
+class ContinueShelf(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if sync_playwright is None:
+            raise RuntimeError("REQUIRE_BROWSER=1 but playwright is not installed")
+        cls.pw = sync_playwright().start()
+        exe = os.environ.get("BROWSER_EXECUTABLE")
+        cls.browser = cls.pw.chromium.launch(**({"executable_path": exe} if exe else {}), args=["--no-sandbox"])
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.browser.close()
+        cls.pw.stop()
+
+    def serve(self, lib, **ctx):
+        self.server = Server(seed=False)
+        self.addCleanup(self.server.cleanup)
+        atomic_write_json(self.server.data / "steam_backlog.json", lib)
+        self.server.start()
+        self.url = f"http://127.0.0.1:{self.server.port}/"
+        self.context = self.browser.new_context(**{"viewport": {"width": 1280, "height": 900}, **ctx})
+        self.addCleanup(self.context.close)
+        self.context.route(lambda u: not u.startswith(self.url.rstrip("/")),
+                           lambda route: route.fulfill(status=200, content_type="text/css", body=""))
+        self.problems: list[str] = []
+
+    def open(self, path="", hash_=""):
+        page = self.context.new_page()
+        page.on("console", lambda m: self.problems.append(f"console {m.type}: {m.text}") if m.type in ("error", "warning") else None)
+        page.on("pageerror", lambda e: self.problems.append(f"pageerror: {e}"))
+        page.on("requestfailed", lambda r: self.problems.append(f"request failed: {r.url} {r.failure}"))
+        page.on("response", lambda r: self.problems.append(f"HTTP {r.status}: {r.url}") if r.status >= 400 else None)
+        page.goto(self.url.rstrip("/") + "/" + path + (("#" + hash_) if hash_ else ""))
+        page.wait_for_function("document.getElementById('who').textContent.includes('Fixture Persona')", timeout=15000)
+        return page
+
+    @staticmethod
+    def shelf(page):
+        return page.eval_on_selector_all("#cont .pick h3", "els => els.map(e => e.textContent.trim())")
+
+    def test_shelf_lists_the_in_progress_games_newest_first(self):
+        lib = fresh_library()
+        want = expected_continue(lib)
+        self.assertGreaterEqual(len(want), 3, "the fixture should give the shelf several games")
+        self.serve(lib)
+        page = self.open()
+        self.assertTrue(page.is_visible("#contSec"))
+        self.assertEqual(self.shelf(page), want)
+        card = page.inner_text("#cont .pick")
+        self.assertRegex(card, r" of ~\d+(\.\d)? h")
+        self.assertRegex(card, r"\d+% on Deck")
+        self.assertEqual(self.problems, [])
+
+    def test_shelf_follows_the_filters_and_hides_when_empty(self):
+        lib = fresh_library()
+        self.serve(lib)
+        page = self.open("", "play=never")           # every in-progress game has been launched
+        self.assertFalse(page.is_visible("#contSec"))
+        self.assertEqual(self.shelf(page), [])
+        page = self.open("", "prog=inprog")           # the filter itself keeps them
+        self.assertEqual(self.shelf(page), expected_continue(lib))
+        self.assertEqual(self.problems, [])
+
+    def test_lane_buttons_remove_a_game_from_the_shelf(self):
+        lib = fresh_library()
+        want = expected_continue(lib)
+        self.serve(lib)
+        page = self.open()
+        page.click("#cont .pick:first-child [data-lane=skip]")
+        page.wait_for_function(f"document.querySelector('#cont .pick h3').textContent.trim() !== {json.dumps(want[0])}")
+        self.assertEqual(self.shelf(page)[:len(want) - 1], want[1:7])
+        self.assertEqual(self.problems, [])
+
+    def test_export_without_play_data_has_no_shelf(self):
+        self.serve(fresh_library(drop=("deckPlaytime", "lastPlayed")))
+        page = self.open()
+        self.assertFalse(page.is_visible("#contSec"))
+        self.assertEqual(self.problems, [])
+
+    def test_missing_deck_playtime_alone_shows_zero_percent(self):
+        lib = fresh_library(drop=("deckPlaytime",))
+        self.serve(lib)
+        page = self.open()
+        self.assertEqual(self.shelf(page), expected_continue(lib))
+        self.assertIn("0% on Deck", page.inner_text("#cont .pick"))
+        self.assertEqual(self.problems, [])
+
+    def test_themes_and_mobile(self):
+        for scheme, size in (("light", {"width": 1280, "height": 900}), ("dark", {"width": 1280, "height": 900}),
+                             ("light", {"width": 390, "height": 844}), ("dark", {"width": 390, "height": 844})):
+            with self.subTest(scheme=scheme, width=size["width"]):
+                self.serve(fresh_library(), color_scheme=scheme, viewport=size)
+                page = self.open()
+                self.assertTrue(page.is_visible("#contSec"))
+                overflow = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+                self.assertLessEqual(overflow, 1, "no horizontal scroll")
+                page = self.open("stats")
+                self.assertFalse(page.is_visible("#contSec"))
+                page = self.open("ask")
+                self.assertFalse(page.is_visible("#contSec"))
+                self.assertEqual(self.problems, [])
+
+
 if __name__ == "__main__":
     unittest.main()
