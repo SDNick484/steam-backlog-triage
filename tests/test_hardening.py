@@ -125,5 +125,46 @@ class SameOriginGuard(Base):
         self.assertEqual(r.status, 200)
 
 
+# ====================================================================== H2: headers on every response
+
+class SecurityHeaders(Base):
+    WANT = {"x-content-type-options": "nosniff", "referrer-policy": "same-origin",
+            "content-security-policy": "frame-ancestors 'none'"}
+
+    def check(self, r, label):
+        for k, v in self.WANT.items():
+            self.assertEqual(r.headers.get(k), v, f"{label}: {k}")
+        self.assertNotIn("script-src", r.headers["content-security-policy"])
+
+    def test_every_kind_of_response(self):
+        s = self.srv
+        etag = s.get("/api/library").headers["etag"]
+        cases = {
+            "200 json": s.get("/api/triage"),
+            "200 page": s.get("/"),
+            "200 stats page": s.get("/stats"),
+            "200 healthz": s.get("/healthz"),
+            "304": s.get("/api/library", {"If-None-Match": etag}),
+            "400": s.put("/api/triage", {"appid": "x"}),
+            "403": s.put("/api/triage", {"appid": 1, "lane": "next"}, {"Origin": "https://evil.example.com"}),
+            "404": s.get("/nope"),
+            "412": s.put("/api/order", {"order": [1]}, {"If-Match": '"' + "0" * 32 + '"'}),
+            "415": s.post("/api/export", b"{}", {"Content-Type": "text/plain"}),
+            "501 stdlib error page": s.req("PATCH", "/api/triage"),
+        }
+        want_status = {"304": 304, "403": 403, "404": 404, "412": 412, "415": 415, "400": 400}
+        for label, r in cases.items():
+            with self.subTest(label):
+                if label in want_status:
+                    self.assertEqual(r.status, want_status[label])
+                self.check(r, label)
+
+    def test_caching_headers_and_etags_are_as_before(self):
+        r = self.srv.get("/api/triage")
+        self.assertEqual(r.headers["cache-control"], "no-store")
+        self.assertRegex(r.headers["etag"], r'^"[0-9a-f]{32}"$')
+        self.assertEqual(self.srv.get("/").headers["cache-control"], "no-store")
+
+
 if __name__ == "__main__":
     unittest.main()

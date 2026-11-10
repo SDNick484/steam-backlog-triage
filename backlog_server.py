@@ -23,7 +23,9 @@ Standard library only. Serves:
 
 Notes and order live in notes.json and order.json next to triage.json.
 
-Every response carries X-Backlog-Server: 1 and X-Backlog-Api: 2 (the API version). GET
+Every response carries X-Backlog-Server: 1 and X-Backlog-Api: 2 (the API version), plus
+X-Content-Type-Options: nosniff, Referrer-Policy: same-origin and Content-Security-Policy: frame-ancestors
+'none'. PUT, POST and DELETE answer 403 to a request the browser marks as cross-site. GET
 /api/library, /api/triage, /api/notes and /api/order send an ETag and honor If-None-Match,
 answering 304 when it still matches. Their PUTs honor an optional If-Match (412 if the
 resource changed since that ETag) and return the previous value; with no If-Match they
@@ -81,6 +83,12 @@ STOP_GRACE = 30                 # seconds between SIGINT, SIGTERM and SIGKILL on
 RING_LINES = 200                # output lines kept in memory per run
 SHOWN_LINES = 20                # ...of which the status object carries the last few
 LINE_MAX = 300
+# Sent on every response. No script-src policy: the page is one file with inline script and style.
+SECURITY_HEADERS = (
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "same-origin"),
+    ("Content-Security-Policy", "frame-ancestors 'none'"),
+)
 
 # backlog.html is written as a page body (it can also be published as a Claude artifact,
 # whose viewer supplies the document shell). Wrap it in a minimal document here.
@@ -528,6 +536,8 @@ def make_handler(app: App):
             # The page checks X-Backlog-Server to know it's self-hosted (vs. a Claude artifact).
             self.send_header("X-Backlog-Server", "1")
             self.send_header("X-Backlog-Api", API_VERSION)
+            for k, v in SECURITY_HEADERS:
+                self.send_header(k, v)
 
         def send(self, status: int, body: bytes = b"", ctype: str = "application/json",
                  headers: dict[str, str] | None = None) -> None:
