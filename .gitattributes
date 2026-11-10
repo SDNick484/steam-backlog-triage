@@ -1,0 +1,2 @@
+# `git archive` fills in the build id (see BUILD_STAMP); no other file is touched.
+backlog_server.py export-subst

@@ -28,7 +28,9 @@ Usage:
 Your Steam profile's "Game details" privacy setting must be Public, or the Web API
 returns an empty library.
 
-Output: steam_backlog.json (load it into the dashboard with "Load export").
+Output: steam_backlog.json (load it into the dashboard with "Load export"). After every run it also writes
+run_status.json beside it: when the run happened, when one last succeeded, how many failed in a row and which
+stage failed. The dashboard's banner and its deep health check read that.
 """
 
 from __future__ import annotations
@@ -506,6 +508,75 @@ class Cache:
         self._dirty = 0
 
 
+# --------------------------------------------------------------------------- Run status
+
+RUN_STATUS_FILE = "run_status.json"
+ERROR_CLASSES = ("steam", "hltb", "details", "other")
+
+
+def utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class RunTracker:
+    """Records how a run ended in run_status.json, beside the library, for the dashboard banner and the deep
+    health check. Both cron and the dashboard's Refresh button run this script (through run-export.sh), so
+    writing it here covers both.
+
+        {"version": 1, "last_attempt": "<UTC>", "last_ok": "<UTC>" | null,
+         "consecutive_failures": <int>, "error_class": null | "steam" | "hltb" | "details" | "other"}
+
+    error_class is the stage that failed, never error text. last_ok is carried over from the previous file when a
+    run fails. A run that wrote a library but had to give up on a step (HowLongToBeat or the store reviews kept
+    failing) or was interrupted counts as failed. Runs skipped by run-export.sh (no keys, another export holding
+    the lock) never reach this script and are not recorded."""
+
+    def __init__(self, out_path: str):
+        self.path = os.path.join(os.path.dirname(os.path.abspath(out_path)), RUN_STATUS_FILE)
+        self.stage = "other"     # which part of the run is going; the class if it raises
+        self.degraded: str | None = None
+        self.interrupted = False
+
+    def degrade(self, error_class: str) -> None:
+        self.degraded = self.degraded or error_class
+
+    def _previous(self) -> dict:
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                prev = json.load(f)
+        except (OSError, ValueError):
+            return {}
+        return prev if isinstance(prev, dict) else {}
+
+    def finish(self, failed: bool = False) -> None:
+        """Write the file. Never raises: a read-only data directory must not turn a good export into a failure."""
+        try:
+            error_class = None
+            if failed:
+                error_class = self.stage if self.stage in ERROR_CLASSES else "other"
+            elif self.degraded:
+                error_class = self.degraded
+            elif self.interrupted:
+                error_class = "other"
+            prev = self._previous()
+            now = utc_stamp()
+            last_ok = prev.get("last_ok") if isinstance(prev.get("last_ok"), str) else None
+            n = prev.get("consecutive_failures")
+            n = n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else 0
+            if error_class is None:
+                last_ok, n = now, 0
+            else:
+                n += 1
+            status = {"version": 1, "last_attempt": now, "last_ok": last_ok, "consecutive_failures": n,
+                      "error_class": error_class}
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(status, f, separators=(",", ":"))
+            os.replace(tmp, self.path)
+        except (OSError, ValueError, TypeError) as e:
+            log(f"Could not write {RUN_STATUS_FILE}: {e}")
+
+
 # --------------------------------------------------------------------------- Main
 
 def run_parallel(label: str, appids: list[int], fn, workers: int) -> None:
@@ -538,10 +609,24 @@ def main() -> None:
     ap.add_argument("--refresh", action="store_true", help="Ignore the cache and fetch everything again")
     ap.add_argument("--limit", type=int, default=0, help="Only process the first N games (for a quick test)")
     args = ap.parse_args()
+    track = RunTracker(args.out)
+    try:
+        run(args, track)
+    except SystemExit as e:
+        if e.code not in (0, None):
+            track.finish(failed=True)
+        raise
+    except BaseException:
+        track.finish(failed=True)
+        raise
+    track.finish()
 
+
+def run(args: argparse.Namespace, track: RunTracker) -> None:
     if not args.key:
         raise SystemExit("Set STEAM_API_KEY or pass --key (get one at https://steamcommunity.com/dev/apikey).")
 
+    track.stage = "steam"
     steamid = resolve_steamid(args.key, args.profile, args.vanity, args.steamid)
     persona = get_persona(args.key, steamid)
     owned = get_owned_games(args.key, steamid)
@@ -556,6 +641,7 @@ def main() -> None:
 
     try:
         # Steam Deck compatibility: light endpoint, ~4 req/s is comfortable.
+        track.stage = "steam"
         deck_limiter = RateLimiter(0.25)
 
         def do_deck(appid: int) -> None:
@@ -568,6 +654,7 @@ def main() -> None:
 
         # Store details: appdetails is limited to roughly 200 requests / 5 minutes.
         if args.details:
+            track.stage = "details"
             details_limiter = RateLimiter(1.6)
 
             def do_details(appid: int) -> None:
@@ -618,8 +705,10 @@ def main() -> None:
             run_parallel("Store reviews", todo, do_reviews, workers=2)
             if streak.stopped:
                 log(f"Store reviews: {fetched['n']} of {len(todo)} fetched this run.")
+                track.degrade("details")
 
         # ProtonDB: roughly one request every 0.3 s, cached for TTL_PROTON days.
+        track.stage = "other"
         proton_limiter = RateLimiter(0.3)
 
         def do_proton(appid: int) -> None:
@@ -637,6 +726,7 @@ def main() -> None:
             except ImportError:
                 log("HowLongToBeat: skipped (pip install howlongtobeatpy to enable).")
             else:
+                track.stage = "hltb"
                 hltb = HowLongToBeat()
                 todo = [a for a in appids if cache.get("hltb", a, TTL_HLTB) is None]
                 if not todo:
@@ -650,6 +740,7 @@ def main() -> None:
                         failures += 1
                         if failures >= 10 and failures == i:
                             log("  HLTB keeps failing (their site may have changed); skipping the rest.")
+                            track.degrade("hltb")
                             break
                     else:
                         cache.put("hltb", appid, res)
@@ -658,9 +749,11 @@ def main() -> None:
                     time.sleep(0.6)
     except KeyboardInterrupt:
         log("\nInterrupted; writing what's done so far.")
+        track.interrupted = True
     finally:
         cache.save()
 
+    track.stage = "other"
     taglist = cache.get("taglist", TAGLIST_KEY, 10**6)
     tag_by_id = taglist["v"] if taglist and isinstance(taglist.get("v"), dict) else {}
     games = []

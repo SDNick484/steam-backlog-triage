@@ -19,7 +19,10 @@ Standard library only. Serves:
   GET  /api/ask/status {"ask": true, "turns": 5} when this request may use Ask, else {"ask": false}
   POST /api/ask         {"thread": [{"q": "..."}, ...]}: a plain-language question about the library, answered
                         by Claude over read-only tools (ask.py; off until ask.env has a key)
+  GET  /api/run-status  run_status.json as the exporter wrote it (how the last export run ended), or null
   GET  /healthz         "ok"
+  GET  /healthz?deep=1  200 or 503 and {"ok", "build", "last_ok", "age_seconds", "consecutive_failures"}:
+                        unhealthy when the last export failed or the last success is over 10 days old
 
 Notes and order live in notes.json and order.json next to triage.json.
 
@@ -63,6 +66,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import ask
@@ -83,6 +87,22 @@ STOP_GRACE = 30                 # seconds between SIGINT, SIGTERM and SIGKILL on
 RING_LINES = 200                # output lines kept in memory per run
 SHOWN_LINES = 20                # ...of which the status object carries the last few
 LINE_MAX = 300
+STALE_SECONDS = 10 * 86400      # a library older than this is stale: the banner and the deep health check say so
+ERROR_CLASSES = ("steam", "hltb", "details", "other")  # run_status.json's error_class, besides null
+
+# The short commit this code came from. .gitattributes marks this file export-subst, so `git archive` fills the
+# placeholder in; install/alpine.sh stamps the installed copy from `git rev-parse --short HEAD`. Anywhere it is
+# still unexpanded (a plain checkout or download), the build is "unknown".
+BUILD_STAMP = "$Format:%h$"
+
+
+def build_id() -> str:
+    """The short commit hash this server was built from, or "unknown"."""
+    b = BUILD_STAMP.strip()
+    if b.startswith("$Format") or not re.fullmatch(r"[0-9a-f]{4,40}", b):
+        return "unknown"
+    return b
+
 # Sent on every response. No script-src policy: the page is one file with inline script and style.
 SECURITY_HEADERS = (
     ("X-Content-Type-Options", "nosniff"),
@@ -236,6 +256,46 @@ class App:
 
     def read_order(self) -> list:
         return read_json(self.order, [])
+
+    def read_run_status(self) -> dict | None:
+        """run_status.json as the exporter wrote it, checked for shape; None if absent or not that shape."""
+        d = read_json(os.path.join(self.data_dir, "run_status.json"), None)
+        if not isinstance(d, dict) or d.get("version") != 1:
+            return None
+        n = d.get("consecutive_failures")
+        cls = d.get("error_class")
+        if (not is_app_id(n) or n < 0 or not isinstance(d.get("last_attempt"), str)
+                or not (d.get("last_ok") is None or isinstance(d["last_ok"], str))
+                or not (cls is None or cls in ERROR_CLASSES)):
+            return None
+        return {"version": 1, "last_attempt": d["last_attempt"], "last_ok": d.get("last_ok"),
+                "consecutive_failures": n, "error_class": cls}
+
+    def health(self, now: datetime.datetime | None = None) -> tuple[int, dict]:
+        """(status, body) for GET /healthz?deep=1. Healthy means the last export run succeeded and that success
+        is at most STALE_SECONDS old. With no run_status.json (an install from before it existed) the library
+        file's mtime stands in for the last success; with neither, nothing is known and it is unhealthy."""
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        rs = self.read_run_status()
+        if rs is not None:
+            last_ok, failures = rs["last_ok"], rs["consecutive_failures"]
+        else:
+            failures = 0
+            try:
+                m = datetime.datetime.fromtimestamp(os.stat(self.library).st_mtime, datetime.timezone.utc)
+                last_ok = m.strftime("%Y-%m-%dT%H:%M:%SZ")
+            except OSError:
+                last_ok = None
+        age = None
+        if last_ok:
+            try:
+                then = datetime.datetime.strptime(last_ok, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+                age = max(0, int((now - then).total_seconds()))
+            except ValueError:
+                last_ok = None
+        ok = failures == 0 and age is not None and age <= STALE_SECONDS
+        return (200 if ok else 503), {"ok": ok, "build": build_id(), "last_ok": last_ok, "age_seconds": age,
+                                       "consecutive_failures": failures}
 
 
 def read_json(path: str, default):
@@ -684,7 +744,12 @@ def make_handler(app: App):
                 return self.export_status()
             if path == "/api/ask/status":
                 return self.json(200, app.ask.status(self.headers, self.client_address[0]))
+            if path == "/api/run-status":
+                return self.json(200, app.read_run_status())
             if path == "/healthz":
+                if "1" in urllib.parse.parse_qs(self.path.partition("?")[2]).get("deep", []):
+                    status, body = app.health()
+                    return self.json(status, body)
                 return self.send(200, b"ok", "text/plain")
             self.json(404, {"error": "not found"})
 
