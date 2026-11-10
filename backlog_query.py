@@ -854,6 +854,32 @@ def overview(games: Sequence[Game], triage: Mapping[int, str]) -> Overview:
     return Overview(n, states, deck, backlog, grid, lanes, coverage)
 
 
+def history_row(games: Sequence[Game], triage: Mapping[int, str]) -> dict:
+    """The numbers one day of history.jsonl holds (everything but the date), computed by the page's own rules:
+    play states and the backlog test as in ``overview``, the backlog's main-length hours as in ``stats_for``'s
+    tiles (rounded half up to a tenth, games with no main time counted in ``backlogWithTime`` only when they
+    have one), total playtime in hours to a tenth. Triage entries for games not in the library count nowhere."""
+    states = {"never": 0, "tried": 0, "played": 0}
+    lanes = {k: 0 for k in (*LANES, "none")}
+    backlog = with_time = 0
+    hours = 0.0
+    minutes = 0
+    for g in games:
+        states[play_state(g)] += 1
+        minutes += g.playtime
+        ln = lane_of(g, triage)
+        lanes[ln if ln in LANES else "none"] += 1
+        if in_backlog(g, triage):
+            backlog += 1
+            h = _main_len(g, "main")
+            if h is not None:
+                with_time += 1
+                hours += h
+    return {"games": len(games), **states, "backlog": backlog, "laneCounts": lanes,
+            "backlogHours": _round_half_up(hours * 10) / 10, "backlogWithTime": with_time,
+            "playHours": _round_half_up(minutes / 60 * 10) / 10}
+
+
 # --------------------------------------------------------------------------- resolving a game
 @dataclass(frozen=True)
 class Resolved:

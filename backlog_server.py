@@ -90,6 +90,8 @@ LINE_MAX = 300
 STALE_SECONDS = 10 * 86400      # a library older than this is stale: the banner and the deep health check say so
 ERROR_CLASSES = ("steam", "hltb", "details", "other")  # run_status.json's error_class, besides null
 LANE_LOG_MAX = 50_000           # lines kept in lane_log.jsonl; the oldest go first
+HISTORY_DAILY_DAYS = 730        # history.jsonl keeps a row per day this long, then the last row of each month
+LIBRARY_POLL_SECONDS = 30       # how often the server looks for an export that cron wrote
 
 # The short commit this code came from. .gitattributes marks this file export-subst, so `git archive` fills the
 # placeholder in; install/alpine.sh stamps the installed copy from `git rev-parse --short HEAD`. Anywhere it is
@@ -164,6 +166,7 @@ class History:
 
     def __init__(self, data_dir: str, now=None, lane_max: int = LANE_LOG_MAX):
         self.lane_path = os.path.join(data_dir, "lane_log.jsonl")
+        self.days_path = os.path.join(data_dir, "history.jsonl")
         self.now = now or local_now
         self.lane_max = lane_max
         self._lane_lines: int | None = None  # lines in lane_log.jsonl; counted on the first write, then kept
@@ -197,6 +200,35 @@ class History:
             os.close(fd)
         self._lane_lines += 1
         return True
+
+    def record_day(self, row: dict) -> None:
+        """Make `row` today's row in history.jsonl: replace the row for today's local date if there is one,
+        else add it. Rows older than HISTORY_DAILY_DAYS are thinned to the last row of each month. The file is
+        rewritten whole with atomic_write; lines that aren't a JSON object with a date are dropped."""
+        today = self.now().date()
+        keep: list[dict] = []
+        try:
+            with open(self.days_path, encoding="utf-8") as f:
+                for text in f:
+                    try:
+                        r = json.loads(text)
+                    except ValueError:
+                        continue
+                    if isinstance(r, dict) and isinstance(r.get("date"), str) and r["date"] != today.isoformat():
+                        keep.append(r)
+        except FileNotFoundError:
+            pass
+        keep.append({"date": today.isoformat(), **{k: v for k, v in row.items() if k != "date"}})
+        keep.sort(key=lambda r: r["date"])
+        cutoff = (today - datetime.timedelta(days=HISTORY_DAILY_DAYS)).isoformat()
+        out: list[dict] = []
+        for i, r in enumerate(keep):
+            old = r["date"] < cutoff
+            # Older rows survive only as the last row of their month (rows are in date order).
+            if old and i + 1 < len(keep) and keep[i + 1]["date"][:7] == r["date"][:7]:
+                continue
+            out.append(r)
+        atomic_write(self.days_path, "".join(json.dumps(r, separators=(",", ":")) + "\n" for r in out).encode())
 
 
 ETAG_TOKEN = re.compile(r'(?:W/)?"[^"]*"|\*')
@@ -245,6 +277,16 @@ class App:
         self._ask_games: tuple[str, list, str | None] | None = None
         # main() replaces this with one built from ask.env; until then Ask is off.
         self.ask = ask.Ask(None, self.data_dir, self.ask_snapshot)
+        # The ETag of the library last written into history.jsonl (or present at startup, which is not a
+        # snapshot of anything new). None until there is a library.
+        self._hist_mu = threading.Lock()
+        self._hist_etag: str | None = self._library_etag_or_none()
+
+    def _library_etag_or_none(self) -> str | None:
+        try:
+            return self.library_etag_and_body(False)[0]
+        except OSError:
+            return None
 
     def library_etag_and_body(self, want_body: bool) -> tuple[str, bytes | None]:
         """Return (etag, body) for the library; body is None only if it wasn't needed and the ETag
@@ -263,10 +305,9 @@ class App:
                 self._lib_key, self._lib_etag = key, etag
         return etag, body
 
-    def ask_snapshot(self) -> backlog_query.Snapshot | None:
-        """The library as Ask's tools see it, or None before the first export. Games are normalized once per
-        ETag; triage, notes and order are read under the same lock their writers take. The SteamID and persona
-        are never copied in."""
+    def games_cached(self) -> list | None:
+        """The library's games, normalized once per ETag; None before the first export or when the file can't
+        be read. Takes no App.lock, so callers holding it may use it."""
         try:
             etag, body = self.library_etag_and_body(False)
             with self._ask_mu:
@@ -285,24 +326,67 @@ class App:
                     self._ask_games = cached
         except (OSError, ValueError):  # no export yet, or one that can't be read
             return None
+        return list(cached[1])
+
+    def ask_snapshot(self) -> backlog_query.Snapshot | None:
+        """The library as Ask's tools see it, or None before the first export. Games are normalized once per
+        ETag; triage, notes and order are read under the same lock their writers take. The SteamID and persona
+        are never copied in."""
+        games = self.games_cached()
+        if games is None:
+            return None
+        with self._ask_mu:
+            exported = self._ask_games[2] if self._ask_games else None
         with self.lock:
             triage, notes, order = self.read_triage(), self.read_notes(), self.read_order()
         ids = lambda m: {int(k): v for k, v in (m.items() if isinstance(m, dict) else ())
                          if isinstance(k, str) and k.isascii() and k.isdigit() and isinstance(v, str) and v}
         return backlog_query.Snapshot(
-            games=list(cached[1]),
+            games=games,
             triage={k: v for k, v in ids(triage).items() if v in LANES},
             notes=ids(notes),
             order=[a for a in order if is_app_id(a)] if isinstance(order, list) else [],
-            exported_at=cached[2])
+            exported_at=exported)
+
+    def record_history(self) -> None:
+        """Write today's history row from the library and the triage as they are now. Call with self.lock held:
+        the triage is read here, so the row and the change that caused it can't be reordered by another writer.
+        Best effort, like the lane log: no library yet means nothing to count, and a file that can't be written
+        is reported on stderr and never fails the caller."""
+        games = self.games_cached()
+        if games is None:
+            return
+        raw = self.read_triage()
+        triage = {int(k): v for k, v in (raw.items() if isinstance(raw, dict) else ())
+                  if isinstance(k, str) and k.isascii() and k.isdigit() and v in LANES - {""}}
+        try:
+            self.history.record_day(backlog_query.history_row(games, triage))
+        except OSError as e:
+            sys.stderr.write(f"history: could not write history.jsonl: {e}\n")
+
+    def check_library(self) -> bool:
+        """Record a row when the library file is not the one history last saw (an export from this server,
+        from cron, or a file loaded on the page). True if it was new. A library that can't be read is
+        skipped, once, rather than retried every poll."""
+        etag = self._library_etag_or_none()
+        with self._hist_mu:
+            if etag is None or etag == self._hist_etag:
+                return False
+            self._hist_etag = etag
+        with self.lock:
+            self.record_history()
+        return True
 
     def note_lane_change(self, appid: int, previous: str, lane: str) -> None:
         """Log a lane change, with self.lock held. Best effort: a history that can't be written is reported on
         stderr and never fails the triage write the person just made."""
         try:
-            self.history.log_lane(appid, previous, lane)
+            changed = self.history.log_lane(appid, previous, lane)
         except OSError as e:
             sys.stderr.write(f"history: could not write lane_log.jsonl: {e}\n")
+            changed = previous != lane  # the lane did change, whether or not the log could say so
+        if changed:
+            self.record_history()
 
     def page_bytes(self) -> bytes:
         with open(self.page, "rb") as f:
@@ -640,6 +724,7 @@ class Exporter:
             run.done = True
         if log is not None:
             log.close()
+        self.app.check_library()
 
 
 def make_handler(app: App):
@@ -903,6 +988,7 @@ def make_handler(app: App):
                     return self.json(400, {"error": "not a steam_backlog_export.py file"})
                 with app.lock:
                     atomic_write(app.library, json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode())
+                app.check_library()
                 return self.json(200, {"ok": True, "games": len(games)})
             self.json(404, {"error": "not found"})
 
@@ -917,6 +1003,22 @@ def parse_nav(items: list[str]) -> list[dict]:
             raise SystemExit(f"--nav expects LABEL=URL, got {item!r}")
         out.append({"label": label.strip(), "url": url.strip()})
     return out
+
+
+class BacklogHTTPServer(ThreadingHTTPServer):
+    # The default listen queue is 5: a burst of simultaneous requests (the page plus an MCP client, say) can
+    # overflow it while the accept loop waits for the GIL, and the overflow is a connection reset.
+    request_queue_size = 64
+
+
+def poll_library(app: App, every: float) -> None:
+    """Notice an export that some other process (cron's run-export.sh) wrote, so the history gets its row."""
+    while True:
+        time.sleep(every)
+        try:
+            app.check_library()
+        except Exception as e:  # a bad poll must never end the thread
+            sys.stderr.write(f"history: library check failed: {e}\n")
 
 
 def main() -> None:
@@ -934,6 +1036,9 @@ def main() -> None:
                          "(default: run-export.sh next to this file, if it is executable)")
     ap.add_argument("--export-timeout", type=int, default=EXPORT_TIMEOUT, metavar="SECONDS",
                     help="Stop an export that this server started after this long (default: %(default)s)")
+    ap.add_argument("--library-poll", type=float, default=LIBRARY_POLL_SECONDS, metavar="SECONDS",
+                    help="How often to look for a library that cron's export wrote, to record it in the history "
+                         "(default: %(default)s; 0 turns the look off)")
     ap.add_argument("--ask-env", metavar="PATH", default=os.path.expanduser("~/.config/backlog-triage/ask.env"),
                     help="Ask settings: the Anthropic key and who may ask (default: %(default)s)")
     args = ap.parse_args()
@@ -956,7 +1061,11 @@ def main() -> None:
     if settings is not None and settings.access:
         verifier = Verifier(settings.access_team, settings.access_aud, settings.emails)
     app.ask = ask.Ask(settings, app.data_dir, app.ask_snapshot, verifier)
-    srv = ThreadingHTTPServer((args.bind, args.port), make_handler(app))
+    if args.library_poll < 0:
+        raise SystemExit("--library-poll must be 0 or more seconds")
+    if args.library_poll:
+        threading.Thread(target=poll_library, args=(app, args.library_poll), daemon=True).start()
+    srv = BacklogHTTPServer((args.bind, args.port), make_handler(app))
     print(f"Backlog Triage on http://{args.bind}:{args.port}/ (data in {args.data})", file=sys.stderr, flush=True)
     print("Exports: " + (f"enabled ({os.path.basename(cmd)}, {args.export_timeout}s limit)" if cmd
                          else "off (no --export-cmd and no run-export.sh beside the server)"),
