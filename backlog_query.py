@@ -1207,6 +1207,7 @@ def tool_filters(*, query: str | None = None, genres: Any = None, genre_match: s
                  protondb_min: str | None = None, metacritic_min: Any = None, metacritic_max: Any = None,
                  year_from: Any = None, year_to: Any = None, controller: Any = None, publishers: Any = None,
                  developers: Any = None, tags: Any = None, reviews: Any = None, play_state: Any = None, lane: Any = None,
+                 progress: Any = None,
                  has_note: bool | None = None, include_unknown: Any = None, unknown_only: Any = None) -> Filters:
     """Tool-shaped arguments (spec 7.5 names and enums) -> Filters. A bad value raises QueryError."""
     kw: dict[str, Any] = {}
@@ -1255,6 +1256,8 @@ def tool_filters(*, query: str | None = None, genres: Any = None, genre_match: s
         kw["play_state"] = _enum_list("play_state", play_state, PLAYS)
     if lane is not None:
         kw["lane"] = _enum_list("lane", lane, LANE_F)
+    if progress is not None:
+        kw["progress"] = _enum_list("progress", progress, PROGS)
     if has_note is not None:
         if not isinstance(has_note, bool):
             raise _bad("has_note", "true or false", has_note)

@@ -271,6 +271,11 @@ FILTER_PROPS = {
     "reviews": _enum_list(bq.REVIEW_KEYS, "Steam user review levels."),
     "play_state": _enum_list(bq.PLAYS, "never = 0 min, tried = under 2 h, played = 2 h or more."),
     "lane": _enum_list(("next", "someday", "skip", "done", "none"), "Triage lanes; none = untriaged."),
+    "progress": _enum_list(bq.PROGS, "Where and how far they have played. inprog = started, not skipped or finished, "
+                                     "under 80% of a known HLTB length and played in the last year (never true when "
+                                     "the length is unknown); deck = any time on the Deck; unstarted = never launched; "
+                                     "deckonly, mostdeck (half or more), mostelse, nodeck = share of playtime on the "
+                                     "Deck. Matches any of them."),
     "has_note": {"type": "boolean", "description": "Only games with (true) or without (false) a note."},
     "include_unknown": _enum_list(("genres", "length", "protondb", "metacritic", "year", "controller",
                                    "publishers", "developers", "tags", "reviews"),
@@ -291,7 +296,7 @@ TOOLS: list[tuple[str, Callable, str, dict]] = [
      "filters had to be dropped to find any (exact=false, relaxed lists them).",
      _obj({**FILTER_PROPS, "view": _VIEW,
            "sort": {"type": "string", "enum": list(bq.SORTS),
-                    "description": "score (couch score, default), short, name, recent, most (played), mc."},
+                    "description": "score (couch score, default), short, name, recent, most (played), mc, deckplay (Deck playtime)."},
            "limit": {"type": "integer", "minimum": 1, "maximum": 25, "description": "Rows (1-25, default 10)."},
            "offset": {"type": "integer", "minimum": 0, "description": "Rows to skip."}})),
     ("get_game", bq.game_out,
@@ -307,8 +312,8 @@ TOOLS: list[tuple[str, Callable, str, dict]] = [
     ("get_stats", bq.stats_out,
      "Counts by one dimension over the filtered games: rows of games, hours played and play states.",
      _obj({"dimension": {"type": "string", "enum": ["genre", "publisher", "developer", "tags", "deck", "protondb",
-                                                    "controller", "length", "lane", "metacritic", "reviews",
-                                                    "year", "decade"]},
+                                                    "controller", "length", "lane", "where_played", "metacritic",
+                                                    "reviews", "year", "decade"]},
            "metric": {"type": "string", "enum": ["games", "hours", "never"],
                       "description": "What ranks the rows: games (default), hours played or never-launched."},
            "view": _VIEW, **FILTER_PROPS}, ["dimension"])),
@@ -329,6 +334,9 @@ controller support, plus their own triage. Answer from the tools only.
 - Triage puts a game in one lane: next (Up next, an ordered queue), someday, skip or done. No lane means
   untriaged. Play state comes from playtime: never (0 min), tried (under 2 h), played (2 h or more). The backlog
   is games that aren't played and aren't in skip or done.
+- "What was I playing" or "what's on the Deck": find_games with progress=["inprog"] (started, not finished, played in
+  the last year; sort recent) or progress=["deck"]; get_stats dimension where_played splits playtime by Deck share.
+  In progress is separate from the backlog, and a game with no HLTB length is never in progress.
 - "What should I play": suggest_picks with the person's constraints. It ranks by the couch score, which favors
   unplayed, Deck Verified, shorter, better-reviewed games; Up next games get +100, so they usually come first.
   Explain picks from score_breakdown.

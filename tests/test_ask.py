@@ -622,6 +622,29 @@ class AskTests(AskServerBase):
         self.assertIn("may be missing", ask.SYSTEM)
         self.assertEqual(props["get_stats"]["required"], ["dimension"])
 
+    def test_progress_and_where_played_reach_the_tools(self):
+        props = dict((n, s) for n, _, _, s in ask.TOOLS)
+        for tool in ("find_games", "suggest_picks", "get_stats"):
+            self.assertEqual(props[tool]["properties"]["progress"]["items"]["enum"], list(bq.PROGS), tool)
+        self.assertIn("deckplay", props["find_games"]["properties"]["sort"]["enum"])
+        self.assertIn("where_played", props["get_stats"]["properties"]["dimension"]["enum"])
+        self.assertIn("progress", ask.SYSTEM)
+        self.assertIn("never in progress", ask.SYSTEM)
+        snap = self.app.ask_snapshot()
+        total = len(snap.games)
+        out, err = ask.run_tool(snap, "find_games", {"view": "all", "progress": ["unstarted"], "limit": 25})
+        self.assertIsNone(err)
+        self.assertEqual(out["matches"], sum(1 for g in snap.games if g.playtime == 0))
+        out, err = ask.run_tool(snap, "find_games", {"view": "all", "progress": ["inprog", "deck"], "sort": "deckplay"})
+        self.assertIsNone(err)
+        out, err = ask.run_tool(snap, "get_stats", {"dimension": "where_played", "view": "all"})
+        self.assertIsNone(err)
+        self.assertEqual(out["total"], total)
+        self.assertEqual(sum(r["games"] for r in out["rows"]), total)
+        self.assertTrue({r["label"] for r in out["rows"]} <= set(bq.STAT_LABELS["where"].values()))
+        _, err = ask.run_tool(snap, "find_games", {"progress": ["bogus"]})
+        self.assertIn("progress must be", err)
+
     def test_run_tool_checks(self):
         snap = self.app.ask_snapshot()
         self.assertEqual(ask.run_tool(snap, "nope", {}), (None, "Unknown tool: nope"))
