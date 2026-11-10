@@ -528,6 +528,30 @@ class WherePlayed(unittest.TestCase):
         self.assertEqual(started, sum(r["n"] for r in st["dims"]["where"]["rows"] if r["key"] in ("deckonly", "mostdeck", "mostelse")))
 
 
+class YearBounds(unittest.TestCase):
+    """A release year outside 1950-2100 (the year filter's own range) is bad data: unknown, like no year.
+
+    Without the bound, one corrupt year makes the stats year histogram walk every year up to it."""
+
+    YEARS = [1949, 1950, 2100, 2101, 3_000_000, 1e300, -2024, 2024.5, 0]
+
+    def test_out_of_range_years_are_unknown_like_the_page(self):
+        raws = [raw(appid=i + 1, name=f"G{i}", year=y) for i, y in enumerate(self.YEARS)]
+        page = run_node(page_code(), "INPUT.games.map(normalize).map((g) => [g.year, g.hasDetails])", games=raws)
+        py = [[g.year, g.has_details] for g in (q.normalize(r, i) for i, r in enumerate(raws))]
+        self.assertEqual(py, page)
+        self.assertEqual([y for y, _ in py], [None, 1950, 2100, None, None, None, None, 2024.5, None])
+        # Store details were still fetched: a bad year doesn't make the controller filter call it unknown.
+        self.assertTrue(all(h for _, h in py))
+
+    def test_stats_years_stay_bounded(self):
+        games = [q.normalize(raw(appid=1, name="A", year=1990), 0),
+                 q.normalize(raw(appid=2, name="B", year=3_000_000), 1)]
+        dim = q.stats_for(games)["dims"]["year"]
+        self.assertEqual([r["key"] for r in dim["rows"]], [1990])
+        self.assertEqual(dim["unknown"]["n"], 1)
+
+
 class StatsParity(unittest.TestCase):
     def test_stats_for_matches_page(self):
         for dsrc in ("main", "extra", "complete"):
