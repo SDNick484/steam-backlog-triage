@@ -431,6 +431,7 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
           <option value="recent">Recently played</option>
           <option value="most">Most played</option>
           <option value="mc">Metacritic</option>
+          <option value="deckplay">Deck playtime</option>
         </select>
       </div>
     </div>
@@ -863,9 +864,10 @@ const TIERS = ["native", "platinum", "gold", "silver", "bronze", "borked", "pend
 const CTRLS = ["full", "partial", "none"];
 const PLAYS = ["never", "tried", "played"];
 const LANE_F = ["none", "next", "someday", "skip", "done"];
+const PROGS = ["inprog", "deck", "unstarted"];
 const SRCS = ["main", "extra", "complete"];
 const VIEWS = ["backlog", "next", "someday", "played", "closed", "all"];
-const SORTS = ["score", "short", "name", "recent", "most", "mc"];
+const SORTS = ["score", "short", "name", "recent", "most", "mc", "deckplay"];
 const MC_OPTS = [60, 70, 75, 80, 85, 90];
 const DEFAULT_F = {
   q: "", view: "backlog", sort: "score",
@@ -879,7 +881,7 @@ const DEFAULT_F = {
   tag: [], tagUnk: false,
   rv: [], rvUnk: false,
   unk: [],
-  play: [], lane: [], notes: "",
+  play: [], lane: [], notes: "", prog: [],
 };
 const numIn = (v, lo, hi) => {
   if (v === null || v === undefined || v === "") return null;
@@ -927,6 +929,7 @@ function clean(raw) {
   r.ctrlUnk = o.ctrlUnk === true;
   r.play = pickIn(o.play, PLAYS);
   r.lane = pickIn(o.lane, LANE_F);
+  r.prog = pickIn(o.prog, PROGS);
   r.notes = ["yes", "no"].includes(o.notes) ? o.notes : "";
   return r;
 }
@@ -993,7 +996,7 @@ function activeCount() {
     f.dnone || f.dmin !== null || f.dmax !== null, f.pt.length > 0,
     f.mc !== null || f.mcmax !== null, f.ymin !== null || f.ymax !== null, f.ctrl.length > 0,
     f.pub.length > 0, f.dev.length > 0, f.tag.length > 0, f.rv.length > 0, f.unk.length > 0,
-    f.play.length > 0, f.lane.length > 0, f.notes !== "",
+    f.play.length > 0, f.lane.length > 0, f.notes !== "", f.prog.length > 0,
   ].filter(Boolean).length;
 }
 function apply() { S.shown = PAGE; saveFilters(); writeHash(); render(); }
@@ -1073,6 +1076,12 @@ function currentTriage() { return S.source === "db" || S.source === "server" ? S
 function lane(g) { return currentTriage().get(g.appid) || ""; }
 const isClosed = (g) => ["skip", "done"].includes(lane(g));
 const inBacklog = (g) => playState(g) !== "played" && !isClosed(g);
+// "In progress" is separate from the backlog view: launched, not closed, a known length, under 80% of it played, and
+// played within the last year. A game with no HLTB time is never in progress (unknown, not zero). Not part of the score.
+const PROG_RULE = { doneFrac: 0.8, recentDays: 365 };
+const inProgress = (g) => g.playtime > 0 && !isClosed(g) && !!mainH(g) && g.playtime < PROG_RULE.doneFrac * mainH(g) * 60 &&
+  g.lastPlayed > 0 && Date.now() / 1000 - g.lastPlayed <= PROG_RULE.recentDays * 86400;
+const progMatch = (g, k) => (k === "inprog" ? inProgress(g) : k === "deck" ? g.deckPlaytime > 0 : g.playtime === 0);
 
 function score(g) {
   let s = 0;
@@ -1380,6 +1389,7 @@ function passes(g) {
   }
   if (f.play.length && !f.play.includes(playState(g))) return false;
   if (f.lane.length && !f.lane.includes(lane(g) || "none")) return false;
+  if (f.prog.length && !f.prog.some((k) => progMatch(g, k))) return false;
   if (f.notes && (f.notes === "yes") !== S.notes.has(g.appid)) return false;
   return true;
 }
@@ -1422,6 +1432,7 @@ function filtered() {
     recent: (a, b) => b.lastPlayed - a.lastPlayed,
     most: (a, b) => b.playtime - a.playtime,
     mc: (a, b) => (b.metacritic || 0) - (a.metacritic || 0),
+    deckplay: (a, b) => b.deckPlaytime - a.deckPlaytime,
   }[f.sort] || ((a, b) => score(b) - score(a));
   return out.sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
 }
@@ -1506,6 +1517,7 @@ function renderPanel() {
   parts.push(fgroup("Deck status", segHtml("deck", DECK_ORDER.map((d) => [String(d), DECK[d].label]))));
   parts.push(fgroup("Controller support", segHtml("ctrl", [["full", "Full"], ["partial", "Partial"], ["none", "None listed"]]), "ctrlUnk", "ctrl"));
   parts.push(fgroup("Play state", segHtml("play", [["never", "Never launched"], ["tried", "Tried (under 2h)"], ["played", "Played 2h+"]])));
+  parts.push(fgroup("Progress", segHtml("prog", [["inprog", "In progress"], ["deck", "Started on Deck"], ["unstarted", "Not started"]])));
   parts.push(fgroup("Triage lane", segHtml("lane", [["none", "No lane"], ["next", "Up next"], ["someday", "Someday"], ["skip", "Skipped"], ["done", "Finished"]])));
   if (canEdit()) {
     parts.push(fgroup("Notes",

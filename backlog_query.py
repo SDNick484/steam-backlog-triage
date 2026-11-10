@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import difflib
 import math
+import time
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -43,11 +44,12 @@ LEN_PRESET: dict[str, tuple[float | None, float | None]] = {
     "short": (None, 4.9), "mid": (5, 14.9), "long": (15, 39.9), "epic": (40, None),
 }
 VIEWS = ("backlog", "next", "someday", "played", "closed", "all")
-SORTS = ("score", "short", "name", "recent", "most", "mc")
+SORTS = ("score", "short", "name", "recent", "most", "mc", "deckplay")
 SRCS = ("main", "extra", "complete")
 CTRLS = ("full", "partial", "none")
 PLAYS = ("never", "tried", "played")
 LANE_F = ("none", "next", "someday", "skip", "done")
+PROGS = ("inprog", "deck", "unstarted")
 MC_OPTS = (60, 70, 75, 80, 85, 90)
 MC_MAX_OPTS = (59, 69, 79, 89)
 UNK_KEYS = ("gen", "pub", "dev", "tag", "pt", "mc", "yr", "ctrl", "rv")
@@ -342,6 +344,25 @@ def in_backlog(g: Game, triage: Mapping[int, str]) -> bool:
     return play_state(g) != "played" and not is_closed(g, triage)
 
 
+# "In progress" (the page's PROG_RULE / inProgress): launched, not closed, a known length, under 80% of it played, and
+# played within the last year. Unknown length is never in progress. Separate from in_backlog and not part of the score.
+PROG_DONE_FRAC = 0.8
+PROG_RECENT_DAYS = 365
+clock: Callable[[], float] = time.time  # tests pin it; the page reads Date.now()
+
+
+def in_progress(g: Game, triage: Mapping[int, str]) -> bool:
+    h = length_hours(g)
+    return bool(
+        g.playtime > 0 and not is_closed(g, triage) and h and g.playtime < PROG_DONE_FRAC * h * 60
+        and g.last_played > 0 and clock() - g.last_played <= PROG_RECENT_DAYS * 86400
+    )
+
+
+def _prog_match(g: Game, k: str, triage: Mapping[int, str]) -> bool:
+    return in_progress(g, triage) if k == "inprog" else g.deck_playtime > 0 if k == "deck" else g.playtime == 0
+
+
 def review_bucket(g: Game) -> str | None:
     """None when the export has no review data; "few" when Steam gave no label."""
     if not g.reviews:
@@ -469,6 +490,7 @@ class Filters:
     play_state: tuple[str, ...] = ()
     lane: tuple[str, ...] = ()  # "none" = untriaged
     has_note: bool | None = None
+    progress: tuple[str, ...] = ()  # PROGS: in progress / started on Deck / not started
 
     def active(self) -> list[str]:
         """Names of the filters that are set, weakest first (the relaxation order). View is never relaxed."""
@@ -501,6 +523,8 @@ class Filters:
             names.append("deck")
         if self.play_state:
             names.append("play_state")
+        if self.progress:
+            names.append("progress")
         if self.lane:
             names.append("lane")
         return names
@@ -522,6 +546,7 @@ class Filters:
             "length": {"hours_min": None, "hours_max": None, "length_none": False, "length_unknown": False},
             "deck": {"deck": ()},
             "play_state": {"play_state": ()},
+            "progress": {"progress": ()},
             "lane": {"lane": ()},
         }
         return replace(self, **cleared[name])
@@ -587,6 +612,7 @@ def clean(raw: Mapping[str, Any]) -> Filters:
         unknown_only=tuple(_pick_in(o.get("unk"), UNK_KEYS)),
         play_state=tuple(_pick_in(o.get("play"), PLAYS)),
         lane=tuple(_pick_in(o.get("lane"), LANE_F)),
+        progress=tuple(_pick_in(o.get("prog"), PROGS)),
         has_note={"yes": True, "no": False}.get(o.get("notes")) if isinstance(o.get("notes"), str) else None,
     )
 
@@ -673,6 +699,8 @@ def passes(g: Game, f: Filters, triage: Mapping[int, str], notes: Mapping[int, s
         return False
     if f.lane and (lane_of(g, triage) or "none") not in f.lane:
         return False
+    if f.progress and not any(_prog_match(g, k, triage) for k in f.progress):
+        return False
     return not (f.has_note is not None and f.has_note != (g.appid in notes))
 
 
@@ -719,6 +747,8 @@ def sort_games(games: list[Game], sort: str, triage: Mapping[int, str]) -> list[
         key = lambda g: (-g.playtime, _name_sort(g))  # noqa: E731
     elif sort == "mc":
         key = lambda g: (-(g.metacritic or 0), _name_sort(g))  # noqa: E731
+    elif sort == "deckplay":
+        key = lambda g: (-g.deck_playtime, _name_sort(g))  # noqa: E731
     else:
         key = lambda g: (-score(g, lane_of(g, triage)), _name_sort(g))  # noqa: E731
     return sorted(games, key=key)

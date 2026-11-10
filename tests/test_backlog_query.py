@@ -66,10 +66,12 @@ def page_code():
     return "\n".join([
         extract_statement(PAGE, r"const TRIED_MIN = "),
         extract_statement(PAGE, r"const playState = "),
+        extract_statement(PAGE, r"const mainH = "),
         extract_statement(PAGE, r"const TIERS = "),
         extract_statement(PAGE, r"const CTRLS = "),
         extract_statement(PAGE, r"const PLAYS = "),
         extract_statement(PAGE, r"const LANE_F = "),
+        extract_statement(PAGE, r"const PROGS = "),
         extract_statement(PAGE, r"const SRCS = "),
         extract_statement(PAGE, r"const VIEWS = "),
         extract_statement(PAGE, r"const SORTS = "),
@@ -86,6 +88,9 @@ def page_code():
         extract_function(PAGE, "lane"),
         extract_statement(PAGE, r"const isClosed = "),
         extract_statement(PAGE, r"const inBacklog = "),
+        extract_statement(PAGE, r"const PROG_RULE = "),
+        extract_statement(PAGE, r"const inProgress = "),
+        extract_statement(PAGE, r"const progMatch = "),
         extract_function(PAGE, "passes"),
         extract_function(PAGE, "selected"),
     ])
@@ -346,6 +351,8 @@ STATES = [
     {"view": "all", "play": ["never"]}, {"view": "all", "play": ["tried", "played"]},
     {"view": "all", "lane": ["none"]}, {"view": "all", "lane": ["next", "done"]},
     {"view": "all", "notes": "yes"}, {"view": "all", "notes": "no"},
+    {"view": "all", "prog": ["deck"]}, {"view": "all", "prog": ["unstarted"]}, {"view": "all", "prog": ["deck", "unstarted"]},
+    {"view": "backlog", "prog": ["deck"], "play": ["tried"]}, {"view": "all", "prog": ["deck", "bogus", "deck"]},
     {"view": "backlog", "deck": [3], "mc": 60, "play": ["never"], "ymin": 2000},
     # values clean() must drop
     {"view": "all", "mc": 82, "mcmax": 100, "deck": ["7"], "rv": ["great"]},
@@ -353,6 +360,90 @@ STATES = [
      "pt": ["gold", "gold", "diamond"], "lane": ["next", "weird"], "unk": ["gen", "len"]},
     {"view": "all", "deck": ["3", 2, "2.0"], "gen": [], "pub": [""] + ["x"] * 3, "q": 5},
 ]
+
+
+# ---------------------------------------------------------------- "in progress" (clock pinned on both sides)
+NOW = 1_731_000_000  # seconds; the page's Date.now() and backlog_query.clock are both set to it
+DAY = 86400
+
+
+def progress_library():
+    """The fixture with lastPlayed spread over ~660 days (so the 365-day edge falls inside it), plus edge cases."""
+    rows = json.loads(json.dumps(RAW))
+    for i, r in enumerate(rows):
+        if r.get("lastPlayed"):
+            r["lastPlayed"] = NOW - (i * 17 + 3) * DAY
+    h = lambda m, e=None: {"main": m, "extra": e, "complete": None}  # noqa: E731
+    edge = [
+        raw(appid=1, name="At 80 percent", playtime=480, lastPlayed=NOW - DAY, hltb=h(10)),        # not under 80%: out
+        raw(appid=2, name="Just under 80", playtime=479, lastPlayed=NOW - DAY, hltb=h(10)),        # in
+        raw(appid=3, name="Exactly a year", playtime=60, lastPlayed=NOW - 365 * DAY, hltb=h(10)),  # in (<= 365 d)
+        raw(appid=4, name="A year and a second", playtime=60, lastPlayed=NOW - 365 * DAY - 1, hltb=h(10)),  # out
+        raw(appid=5, name="Extra only", playtime=60, lastPlayed=NOW - DAY, hltb=h(None, 7)),        # in (mainH falls back)
+        raw(appid=6, name="No HLTB", playtime=600, lastPlayed=NOW - DAY),                           # out: unknown length
+        raw(appid=7, name="Never launched", playtime=0, lastPlayed=NOW - DAY, hltb=h(10)),          # out
+        raw(appid=8, name="No last played", playtime=60, lastPlayed=0, hltb=h(10)),                 # out
+        raw(appid=9, name="Skipped", playtime=60, lastPlayed=NOW - DAY, hltb=h(10)),                # out (lane skip)
+        raw(appid=10, name="Finished", playtime=60, lastPlayed=NOW - DAY, hltb=h(10)),              # out (lane done)
+        raw(appid=11, name="Deck only", playtime=300, deckPlaytime=300, lastPlayed=NOW - DAY, hltb=h(20)),  # in
+    ]
+    return rows + edge
+
+
+PROG_TRIAGE = {**TRIAGE, 9: "skip", 10: "done", 11: "next"}
+PROG_STATES = [
+    {"view": "all", "prog": ["inprog"]}, {"view": "backlog", "prog": ["inprog"]},
+    {"view": "all", "prog": ["inprog", "unstarted"]}, {"view": "all", "prog": ["inprog"], "play": ["played"]},
+    {"view": "all", "prog": ["inprog"], "lane": ["none"]}, {"view": "all", "prog": ["deck"], "q": "game"},
+]
+
+
+class InProgress(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(setattr, q, "clock", q.clock)
+        q.clock = lambda: NOW
+        self.raw = progress_library()
+        self.games = [q.normalize(r, i) for i, r in enumerate(self.raw)]
+
+    def test_the_edges(self):
+        got = {g.name for g in self.games if q.in_progress(g, PROG_TRIAGE)}
+        for name in ("Just under 80", "Exactly a year", "Extra only", "Deck only"):
+            self.assertIn(name, got)
+        for name in ("At 80 percent", "A year and a second", "No HLTB", "Never launched", "No last played",
+                     "Skipped", "Finished"):
+            self.assertNotIn(name, got)
+
+    def test_page_parity(self):
+        run = run_node(
+            "Date.now = () => INPUT.now * 1000;\nconst S = {};\n" + page_code(),
+            "(() => { Object.assign(S, { f: null, games: INPUT.games.map(normalizeGame).map(annotateNames),"
+            " notes: new Set(INPUT.notes), source: 'server', triage: new Map(INPUT.triage) });"
+            " return { flags: S.games.map((g) => inProgress(g)),"
+            " sel: INPUT.states.map((st) => { S.f = clean(st); return selected().map((g) => g.appid); }) }; })()",
+            games=self.raw, states=PROG_STATES + STATES, notes=list(NOTES), now=NOW,
+            triage=[[a, v] for a, v in PROG_TRIAGE.items()])
+        self.assertEqual(run["flags"], [q.in_progress(g, PROG_TRIAGE) for g in self.games])
+        self.assertGreater(sum(run["flags"]), 5)
+        self.assertLess(sum(run["flags"]), len(run["flags"]) - 5)
+        for state, want in zip(PROG_STATES + STATES, run["sel"]):
+            with self.subTest(state=state):
+                got = [g.appid for g in q.selected(self.games, q.clean(state), PROG_TRIAGE, NOTES)]
+                self.assertEqual(got, want)
+
+    def test_filter_values_sort_and_view_semantics(self):
+        f = q.clean({"view": "all", "prog": ["inprog", "bogus", "inprog"]})
+        self.assertEqual(f.progress, ("inprog",))
+        self.assertIn("progress", f.active())
+        self.assertEqual(f.without("progress").progress, ())
+        sel = q.selected(self.games, f, PROG_TRIAGE, NOTES)
+        self.assertTrue(sel and all(q.in_progress(g, PROG_TRIAGE) for g in sel))
+        by_deck = [g.deck_playtime for g in q.sort_games(list(self.games), "deckplay", PROG_TRIAGE)]
+        self.assertEqual(by_deck, sorted(by_deck, reverse=True))
+        # D6: "backlog" still means not played and not closed. A game can be in progress and not in the backlog.
+        d = by_name(self.games, "Deck only")
+        self.assertTrue(q.in_progress(d, PROG_TRIAGE))
+        self.assertEqual(q.play_state(d), "played")
+        self.assertFalse(q.in_backlog(d, PROG_TRIAGE))
 
 
 class FilterVectors(unittest.TestCase):
