@@ -75,6 +75,7 @@ nav.pages a:hover{color:var(--accent-ink)}
 
 .banner{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;border:1px dashed var(--line-strong);background:var(--surface);border-radius:10px;padding:12px 16px;font-size:14px;color:var(--ink-2)}
 .banner strong{color:var(--ink)}
+#healthBanner{border-style:solid;margin-top:10px}
 .source-line{font-size:13px;color:var(--muted)}
 
 /* How-to */
@@ -336,6 +337,11 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
     <button class="btn" type="button" id="showHowto">How to export</button>
   </div>
 
+  <div class="banner" id="healthBanner" role="status" hidden>
+    <span id="healthText"></span>
+    <button class="btn" type="button" id="healthDismiss">Dismiss</button>
+  </div>
+
   <details class="howto only-list" id="howto">
     <summary>Load your real library</summary>
     <ol class="steps">
@@ -560,6 +566,7 @@ const S = {
   db: null,
   server: false,             // true when served by backlog_server.py
   api: 0,                    // backlog_server.py's API version (X-Backlog-Api), 0 if unknown
+  run: null,                 // run_status.json from api/run-status: how the last export run ended (null: none yet)
   bucketExists: new Set(),
   loadedVersion: null,
   notes: new Map(),          // appid -> note text (self-hosted only)
@@ -1168,6 +1175,59 @@ function setLibrary(games, source, meta) {
   S.meta = meta || null;
   S.shown = PAGE;
   render();
+  renderHealth();
+}
+
+// ---------------------------------------------------------------- stale or failed export banner
+// One dismissible banner on a server-backed library: the last export run failed, or the data is over 10 days old.
+// Dismissal lasts for the session (sessionStorage, or in memory where that is unavailable) and applies to that
+// exact situation; a new failure or a newer export shows it again.
+const STALE_DAYS = 10;
+let healthDismissed = null;
+function healthState() {
+  if (S.source !== "server" || !S.meta) return null;
+  const run = S.run;
+  const at = Date.parse(S.meta.exportedAt || "");
+  const when = isNaN(at) ? null : new Date(at);
+  if (run && run.error_class) {
+    const stamp = when ? when.toLocaleString() : "an unknown time";
+    return { key: "failed|" + run.last_attempt + "|" + run.error_class,
+             html: `Library data last refreshed ${esc(stamp)}. The last refresh failed (${esc(run.error_class)}); see the export log on the server.` };
+  }
+  if (when) {
+    const days = Math.floor((Date.now() - when.getTime()) / 86400000);
+    if (Date.now() - when.getTime() > STALE_DAYS * 86400000) {
+      return { key: "stale|" + S.meta.exportedAt, html: `Library data was last refreshed ${esc(String(days))} days ago; see the export log on the server.` };
+    }
+  }
+  return null;
+}
+function wasDismissed(key) {
+  if (healthDismissed === key) return true;
+  try { return sessionStorage.getItem("bt-health-dismissed") === key; } catch (e) { return false; }
+}
+function renderHealth() {
+  const h = healthState();
+  const show = !!h && !wasDismissed(h.key);
+  $("healthBanner").hidden = !show;
+  $("healthBanner").dataset.key = h ? h.key : "";
+  if (show) $("healthText").innerHTML = h.html;
+}
+$("healthDismiss").addEventListener("click", () => {
+  const key = $("healthBanner").dataset.key;
+  if (key) {
+    healthDismissed = key;
+    try { sessionStorage.setItem("bt-health-dismissed", key); } catch (e) {}
+  }
+  $("healthBanner").hidden = true;
+});
+async function loadRunStatus() {
+  try {
+    const r = await fetch(API("api/run-status"), { cache: "no-store" });
+    const d = r.ok ? await r.json() : null;
+    S.run = d && typeof d === "object" ? d : null;
+  } catch (e) { S.run = null; }
+  renderHealth();
 }
 
 // ---------------------------------------------------------------- render
@@ -2208,6 +2268,7 @@ async function bootServer() {
     const o = await fetch(API("api/order"), { cache: "no-store" });
     if (o.ok) { const arr = await o.json(); if (Array.isArray(arr)) S.order = arr.map(Number); }
   } catch (e) {}
+  await loadRunStatus();
   if (r.ok) {
     const data = await r.json();
     setLibrary((data.games || []).map(normalizeGame), "server",
@@ -2279,6 +2340,7 @@ async function pollRefresh() {
   }
   if (!refreshWatching) return;   // an old result from before this page opened: nothing to report
   refreshWatching = false;
+  await loadRunStatus();   // the exporter has just written how this run ended
   if (st.state === "succeeded") {
     if (st.libraryChanged) {
       try { await reloadLibrary(); toast("Library refreshed."); } catch (e) { toast("Export finished, but the library could not be reloaded."); }
