@@ -17,6 +17,8 @@
 # Ask (AI search) is configured in ~/.config/backlog-triage/ask.env, created empty on first install; it stays
 # off until you set ANTHROPIC_SEARCH_KEY there. See the README's "AI search (Ask)" section.
 #
+# Logs under ~/logs are rotated weekly by /etc/logrotate.d/steam-backlog-triage (this app's two files only).
+#
 # Safe to re-run: code is updated, ~/.steam-env, ask.env and your data are kept, and the options above
 # are remembered (in /etc/steam-backlog-triage.conf). Set NAV= (empty) to remove a link.
 set -eu
@@ -40,7 +42,7 @@ say() { printf '\n==> %s\n' "$*"; }
 case "$NAV" in *[[:space:]\'\"]*) echo "NAV must not contain spaces or quotes."; exit 1;; esac
 
 say "Installing packages"
-apk add --no-cache python3 py3-pip tzdata ca-certificates >/dev/null </dev/null
+apk add --no-cache python3 py3-pip tzdata ca-certificates logrotate >/dev/null </dev/null
 
 if [ -n "$TZ_NAME" ]; then
   say "Setting time zone to $TZ_NAME"
@@ -55,6 +57,21 @@ mkdir -p "$PREFIX" "$HOME_DIR/exports" "$HOME_DIR/logs"
 say "Installing to $PREFIX"
 install -m 0755 "$SRC/steam_backlog_export.py" "$SRC/backlog_server.py" "$SRC/run-export.sh" "$PREFIX/"
 install -m 0644 "$SRC/backlog.html" "$SRC/backlog_query.py" "$SRC/access_jwt.py" "$SRC/ask.py" "$PREFIX/"
+
+# Stamp the build id (shown by /healthz?deep=1) into the installed copy of the server, never the checkout: the
+# short commit of this checkout when git can tell. Without git, or from a plain download, the placeholder stays
+# and the build reads "unknown". A copy that git archive already stamped has no placeholder left to replace.
+BUILD=$(git -C "$SRC" -c safe.directory="$SRC" rev-parse --short HEAD 2>/dev/null </dev/null || true)
+case "$BUILD" in
+  ""|*[!0-9a-f]*) BUILD="" ;;
+esac
+# shellcheck disable=SC2016  # the $ in the patterns below is literal: it is the placeholder's own
+if [ -n "$BUILD" ]; then
+  sed -i "s/^BUILD_STAMP = \"\$Format:%h\$\"\$/BUILD_STAMP = \"$BUILD\"/" "$PREFIX/backlog_server.py"
+  echo "Build $BUILD"
+elif grep -q '^BUILD_STAMP = "\$Format' "$PREFIX/backlog_server.py"; then
+  echo "Build unknown (no git checkout)"
+fi
 
 say "Setting up a Python venv for HowLongToBeat lookups"
 [ -x "$PREFIX/venv/bin/python" ] || python3 -m venv "$PREFIX/venv" </dev/null
@@ -109,6 +126,22 @@ EOF
 fi
 chown -R "$APP_USER:$APP_USER" "$HOME_DIR"
 chown -R root:root "$PREFIX"
+
+say "Rotating this app's logs"
+# Only this app's two files, in a file of its own: replaced on every run, no other logrotate config is touched.
+# copytruncate because the cron job and the service keep their log open.
+mkdir -p /etc/logrotate.d
+cat > /etc/logrotate.d/steam-backlog-triage <<EOF
+$HOME_DIR/logs/dashboard.log $HOME_DIR/logs/backlog.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+chmod 0644 /etc/logrotate.d/steam-backlog-triage
 
 say "Scheduling the export ($EXPORT_SCHEDULE)"
 # Replace only this project's block, so other jobs in the same crontab survive.

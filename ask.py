@@ -640,6 +640,16 @@ def _host_only(netloc: str) -> str:
     return netloc.rsplit(":", 1)[0] if netloc.count(":") == 1 else netloc
 
 
+def cross_site_request(headers) -> bool:
+    """True when the browser says this request was made by another site: an Origin whose host is not the
+    request's Host, or Sec-Fetch-Site: cross-site. A request with neither header (curl, cron, a loopback
+    client) is not cross-site. Shared by Ask and by every mutating route of backlog_server.py."""
+    origin = (headers.get("Origin") or "").strip()
+    if origin and urllib.parse.urlparse(origin).netloc.lower() != (headers.get("Host") or "").strip().lower():
+        return True
+    return (headers.get("Sec-Fetch-Site") or "").strip().lower() == "cross-site"
+
+
 def _is_ip(h: str) -> bool:
     try:
         ipaddress.ip_address(h)
@@ -664,10 +674,7 @@ class Ask:
     # ---- step 1
     @staticmethod
     def cross_site(headers) -> bool:
-        origin = (headers.get("Origin") or "").strip()
-        if origin and urllib.parse.urlparse(origin).netloc.lower() != (headers.get("Host") or "").strip().lower():
-            return True
-        return (headers.get("Sec-Fetch-Site") or "").strip().lower() == "cross-site"
+        return cross_site_request(headers)
 
     # ---- step 2
     def lan_ok(self, headers, peer: str) -> bool:

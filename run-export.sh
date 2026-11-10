@@ -11,6 +11,9 @@
 # One export runs at a time, whoever starts it (cron, a timer, the dashboard's Refresh library
 # button, a shell). The run holds an exclusive lock on $EXPORT_DIR/.export.lock until it exits.
 #
+# The exporter records how each run ended in $EXPORT_DIR/run_status.json (the dashboard's banner and
+# /healthz?deep=1 read it). A run that exits here, with 75 or 78, never reaches the exporter and writes nothing.
+#
 # Exit status (sysexits):
 #   0   the export finished (including "Interrupted; writing what's done so far")
 #   75  another export is already running (the lock is held)

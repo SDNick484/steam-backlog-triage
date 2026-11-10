@@ -26,11 +26,12 @@ Everything is standard-library Python, plus the optional [`howlongtobeatpy`](htt
 
 | File | What it does |
 |---|---|
-| `steam_backlog_export.py` | Exports your library to `steam_backlog.json`, caching lookups so later runs are fast |
+| `steam_backlog_export.py` | Exports your library to `steam_backlog.json`, caching lookups so later runs are fast, and records how the run ended in `run_status.json` |
 | `backlog_server.py` | Serves the dashboard and its small JSON API |
 | `backlog.html` | The dashboard page |
 | `backlog_query.py`, `access_jwt.py`, `ask.py` | Ask (AI search): the read-only backlog queries, Cloudflare Access token checks, and the question loop. Imported by the server at start-up, so keep them next to `backlog_server.py` |
 | `SCORING.md` | How the couch score is computed (the spec other tools implement) |
+| `.gitattributes` | Marks `backlog_server.py` `export-subst`, so `git archive` fills in its build id |
 | `run-export.sh` | Wrapper for cron/systemd and the dashboard's **Refresh library** button; reads your keys from `~/.steam-env` and takes the export lock |
 | `install/alpine.sh` | Installer for Alpine Linux (OpenRC); works well in a small Proxmox LXC |
 | `contrib/systemd/` | Service and timer units for systemd hosts |
@@ -74,6 +75,7 @@ The installer sets up:
 - your keys in `/home/steam/.steam-env` (mode 600)
 - an empty settings file for [Ask](#ai-search-ask) at `/home/steam/.config/backlog-triage/ask.env` (mode 600), created once and never overwritten
 - a weekly export (Mondays 04:15), added as its own marked block in the `steam` user's crontab
+- [log rotation](#log-rotation) for the app's own two log files, in `/etc/logrotate.d/steam-backlog-triage`
 - the dashboard as an OpenRC service on port 8484
 
 Re-running the installer updates the code and keeps your settings and data. It also remembers the options below, so pass one again only to change it. Other options:
@@ -111,10 +113,54 @@ The server has no login.
 - **Keep it private:** bind it to your LAN or a VPN (Tailscale, WireGuard), or put it behind an authenticating reverse proxy such as Cloudflare Tunnel + Access.
 - **Don't expose it directly.** Anyone who can reach it can change triage marks or replace the library.
 - **Keys stay on the server.** They live only in `~/.steam-env` (Steam) and `ask.env` (Ask) and are never sent to the page. The export never sees the Anthropic key.
+- **Cross-site requests are refused.** Every `PUT`, `POST` and `DELETE` answers `403 {"error": "cross-site request refused"}` when the browser says another site sent it: an `Origin` header whose host is not the request's `Host`, or `Sec-Fetch-Site: cross-site`. A request with neither header (curl, cron, the MCP server's client) is not affected, and neither is the page itself. Ask makes the same check, with its own message. This stops a web page you visit from changing your triage marks or starting an export through your browser; it is not a login.
+- **Response headers.** Every response, errors and `304`s included, carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` and `Content-Security-Policy: frame-ancestors 'none'` (the page can't be framed). There is no `script-src` policy: the page is one file with inline script.
+
+## Log rotation
+
+On Alpine the installer adds `logrotate` and writes `/etc/logrotate.d/steam-backlog-triage`, covering only this app's two files, `~/logs/dashboard.log` and `~/logs/backlog.log` (the cron export's output): weekly, 8 kept, compressed, `copytruncate` since both stay open. Re-running the installer rewrites that one file and touches no other logrotate config. Alpine runs logrotate from its daily periodic job. On other systems, rotate those files however you rotate logs.
+
+## Stale or failed exports
+
+After every export run, from cron or the **Refresh library** button (both go through `run-export.sh`), the exporter writes `run_status.json` in the data directory:
+
+```json
+{"version": 1, "last_attempt": "2026-11-10T19:40:03Z", "last_ok": "2026-11-03T04:15:41Z", "consecutive_failures": 1, "error_class": "hltb"}
+```
+
+`error_class` is `null` after a good run, else the stage that failed: `steam` (the Steam API or Deck ratings), `details` (store details, tags or reviews), `hltb` (HowLongToBeat) or `other`. It is never error text; the detail is in the export log on the server. A run that wrote a library but had to give up on a step, or was interrupted, counts as failed. `last_ok` is kept from the previous file when a run fails, and `consecutive_failures` goes back to 0 on success. A run that never reaches the exporter (no keys set, or another export holding the lock) writes nothing. `GET /api/run-status` returns the file, or `null` before the first run.
+
+The page shows one dismissible banner when the last run failed (*Library data last refreshed …. The last refresh failed (hltb); see the export log on the server.*) or the library is more than 10 days old (*Library data was last refreshed 12 days ago; see the export log on the server.*). Dismissing it lasts for the browser tab's session; a new failure shows it again. With no `run_status.json` yet, only the age check applies.
+
+### Deep health check
+
+`GET /healthz` still answers plain `ok`. `GET /healthz?deep=1` answers `200` or `503` with JSON:
+
+```json
+{"ok": true, "build": "a1b2c3d", "last_ok": "2026-11-10T04:15:41Z", "age_seconds": 52000, "consecutive_failures": 0}
+```
+
+`ok` is true when the last run succeeded (`consecutive_failures` is 0) and `last_ok` is at most 10 days old. Without `run_status.json`, `last_ok` falls back to the library file's modification time; with no library either, `last_ok` and `age_seconds` are `null` and `ok` is false. `build` is the short commit the server was installed from: the installer stamps it into the installed copy of `backlog_server.py` when it runs from a git checkout, and a copy from `git archive` carries it too (`.gitattributes` marks the file `export-subst`). Anywhere else it is `unknown`.
+
+A Home Assistant REST sensor (host is a placeholder; the endpoint needs no login, so keep it on your LAN):
+
+```yaml
+binary_sensor:
+  - platform: rest
+    name: Backlog library fresh
+    resource: http://steam.example.com:8484/healthz?deep=1
+    method: GET
+    device_class: problem
+    value_template: "{{ 'OFF' if value_json.ok else 'ON' }}"
+    json_attributes: [build, last_ok, age_seconds, consecutive_failures]
+    scan_interval: 3600
+```
+
+The `503` carries the same JSON body, so the sensor can read `ok: false`; if your Home Assistant version marks a REST sensor unavailable on a non-200 answer instead, that is a signal too.
 
 ## API
 
-Every response carries `X-Backlog-Server: 1` and `X-Backlog-Api: 2`.
+Every response carries `X-Backlog-Server: 1` and `X-Backlog-Api: 2` (and the headers listed under [Security](#security)). `PUT`, `POST` and `DELETE` from another site get 403.
 
 | Method | Path | |
 |---|---|---|
@@ -126,7 +172,8 @@ Every response carries `X-Backlog-Server: 1` and `X-Backlog-Api: 2`.
 | GET / PUT | `/api/order` | Up next order; PUT `{"order": [620, 1145360]}` (distinct app ids) |
 | POST | `/api/export` | Start an export in the background: 202, or 409 if one is already running. The request needs `Content-Type: application/json` (415 otherwise) |
 | GET | `/api/export/status` | The running or last export: `state`, `phase`, `progress`, recent redacted log lines, and whether the library changed |
-| GET | `/healthz` | `ok` |
+| GET | `/api/run-status` | `run_status.json`: how the last export run ended (see [Stale or failed exports](#stale-or-failed-exports)), or `null` |
+| GET | `/healthz` | `ok`; with `?deep=1`, 200 or 503 and JSON: `ok`, `build`, `last_ok`, `age_seconds`, `consecutive_failures` |
 
 **ETags.** The library, triage, notes and order responses carry an `ETag`, and send `304 Not Modified` when you send a matching `If-None-Match`. A PUT to triage, notes or order may send `If-Match` with an ETag from an earlier GET; if the resource has changed since, the server answers `412` with the current ETag and writes nothing. Without `If-Match` a PUT works as it always did, which is how the page uses them. Each successful PUT also returns the value it replaced as `previous`.
 
@@ -200,11 +247,11 @@ The product needs only the Python standard library. The tests use `unittest`, an
 # Server routes, export endpoints, exporter (against a mock Steam), run-export.sh, privacy scanner, score parity
 python3 -m unittest -v tests.test_server tests.test_export_endpoints tests.test_exporter \
   tests.test_run_export tests.test_privacy_scan tests.test_score_vectors tests.test_stats \
-  tests.test_backlog_query tests.test_access_jwt tests.test_ask
+  tests.test_backlog_query tests.test_access_jwt tests.test_ask tests.test_hardening
 
 # The page in a real browser (pip install -r tests/browser/requirements.txt && playwright install chromium)
 python3 -m unittest -v tests.browser.test_page tests.browser.test_filters tests.browser.test_stats_page \
-  tests.browser.test_ask_page
+  tests.browser.test_ask_page tests.browser.test_health_banner
 
 # The Alpine installer, stubbed (changes /etc and /opt: run it in a container)
 docker run --rm -v "$PWD":/src:ro python:3.12-alpine sh /src/tests/installer/check.sh
@@ -219,8 +266,9 @@ What each part checks:
 - **Export endpoint tests** use stub scripts for `--export-cmd`: 202, 409 while running (including a lock held by another process), exit codes, timeouts, and redaction of a fake key, an IPv4 address and a SteamID in the status lines.
 - **Exporter tests** run the real exporter against a local mock of the Steam API, the store and ProtonDB (`STEAM_API_BASE`, `STEAM_STORE_BASE`, `PROTONDB_BASE`), with `--limit`, without `howlongtobeatpy`, cache reuse, ProtonDB garbage, and a 429 followed by success. Sleeps are replaced by a recorder, so the suite never waits.
 - **Score parity** runs the page's `score()` under node against `tests/score_vectors.json`. In CI a missing node is a failure, not a skip.
+- **Hardening tests** (`tests.test_hardening`): the same-origin guard on every mutating route, the response headers on 200, 304, 403, 404 and error pages, the exporter's `run_status.json` (shape, classification, `last_ok` kept on failure), the deep health matrix and the build id (including a `git archive` of a temp repo). The browser test for the banner covers failed, stale, both, healthy and dismissed.
 - **Page test** loads `backlog.html` in Chromium with no console errors, checks that lanes, the Up next order and notes persist across a second load, and that **Refresh library** runs a stub export and reloads.
-- **Installer test** runs `install/alpine.sh` in `python:3.12-alpine` twice (and a third time with one option changed): `~/.steam-env`, `ask.env` and the saved options are kept, the Ask modules are installed and import, there is exactly one `BEGIN`/`END` cron block, and unrelated cron lines survive.
+- **Installer test** runs `install/alpine.sh` in `python:3.12-alpine` twice (and a third time with one option changed): `~/.steam-env`, `ask.env` and the saved options are kept, the Ask modules are installed and import, there is exactly one `BEGIN`/`END` cron block, and unrelated cron lines survive. It also checks the logrotate file (present, its content, rewritten identically, no other logrotate file touched) and the build stamp.
 - **MCP contract tests**: CI checks out [`mcp-server-steam-backlog`](https://github.com/SDNick484/mcp-server-steam-backlog) at a pinned commit and runs its `tests/test_contract.py` against this checkout's server (`BACKLOG_CHECKOUT`, `BACKLOG_REQUIRE_REAL=1`). A weekly run does the same against that repo's `main`. Bump `MCP_PINNED_REF` in `.github/workflows/ci.yml` when the contract changes.
 
 CI runs on pushes to `main`, pull requests, weekly, and on demand. The unit tests run on Python 3.11 to 3.14; the other jobs use one version. Every third-party action is pinned to a full commit SHA with its version in a comment, and Dependabot updates them weekly, along with the test-only Playwright pin in `tests/browser/requirements.txt`.

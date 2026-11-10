@@ -37,6 +37,12 @@ Up next order) and serves the page and its JSON API. Sibling repos: `steam-wishl
 - **Export fields are additive.** `SCHEMA_VERSION` and `API_VERSION` change only on purpose.
 - **The MCP contract tests must stay green.** CI runs the MCP repo's `tests/test_contract.py` against this
   server at `MCP_PINNED_REF`. Bump the pin when the contract changes; the weekly run checks the MCP's `main`.
+- **Mutating routes refuse cross-site requests** (`ask.cross_site_request`, used by Ask and by every PUT, POST
+  and DELETE in `backlog_server.py`), and every response carries the `SECURITY_HEADERS`. Keep both when adding a route.
+- **`run_status.json`** is written by the exporter (`RunTracker`) after every run and read by the server for
+  `/api/run-status`, `/healthz?deep=1` and the page's banner. Its shape is shared with steam-wishlist-deals: change
+  it in both. `BUILD_STAMP` in `backlog_server.py` is filled by `git archive` (`.gitattributes`) or by the installer;
+  never write a real hash into the checkout.
 - **Nothing writes triage, notes or order except `backlog_server.py`**, under its lock with `atomic_write`.
   Not the exporter, not Ask, not the MCP server.
 - **Ask is read-only.** No tool changes lanes, notes, order or the library, or starts an export. The
@@ -54,11 +60,11 @@ Up next order) and serves the page and its JSON API. Sibling repos: `steam-wishl
 # Unit tests (node and openssl must be present; CI fails on any skip)
 REQUIRE_NODE=1 REQUIRE_OPENSSL=1 python3 -m unittest -v tests.test_server tests.test_export_endpoints \
   tests.test_exporter tests.test_run_export tests.test_privacy_scan tests.test_score_vectors \
-  tests.test_stats tests.test_backlog_query tests.test_access_jwt tests.test_ask
+  tests.test_stats tests.test_backlog_query tests.test_access_jwt tests.test_ask tests.test_hardening
 
 # Page in Chromium: pip install -r tests/browser/requirements.txt && playwright install chromium
 REQUIRE_BROWSER=1 python3 -m unittest -v tests.browser.test_page tests.browser.test_filters \
-  tests.browser.test_stats_page tests.browser.test_ask_page
+  tests.browser.test_stats_page tests.browser.test_ask_page tests.browser.test_health_banner
 
 # Installer (changes /etc and /opt: container only)
 docker run --rm -v "$PWD":/src:ro python:3.12-alpine sh /src/tests/installer/check.sh
