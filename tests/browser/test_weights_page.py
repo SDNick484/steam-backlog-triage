@@ -1,7 +1,8 @@
 """The Tune picks panel, the custom-weights badge and the score breakdown on each pick card (backlog.html).
 
 What it proves: weights saved in prefs.json rank the picks and the Score sort exactly as backlog_query does, and each
-card's breakdown line equals backlog_query.explain(score_breakdown(...)) (the page-vs-Python label check); dragging a
+card's breakdown line equals backlog_query.explain(score_breakdown(...)) for the weights used here (deck and length off,
+no Up next game, so only some labels appear; the full label parity is pinned in tests/test_score_vectors.py); dragging a
 slider re-ranks the picks without a network write and Cancel restores the saved order; Save sends one PUT with
 If-Match and survives a reload; Reset needs a Save; a stale tab gets the 412 message and the newer weights; without
 the prefs route the Tune button is hidden. Run in a light and a dark colour scheme at 390 px.

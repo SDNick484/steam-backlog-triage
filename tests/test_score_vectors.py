@@ -77,7 +77,8 @@ if (mode === "consts") {
     const rows = vectors.map((v) => {
       const g = sandbox.normalize(v.game);
       g.__lane = v.lane;
-      return { id: v.id, score: sandbox.score(g), terms: sandbox.scoreTerms(g).map((t) => [t[0], t[2]]) };
+      return { id: v.id, score: sandbox.score(g), terms: sandbox.scoreTerms(g).map((t) => [t[0], t[2]]),
+        labeled: sandbox.scoreTerms(g).map((t) => [t[0], t[1], t[2]]) };
     });
     res[set.name] = rows;
   }
@@ -159,6 +160,21 @@ class ScoreVectors(unittest.TestCase):
             with self.subTest(set=ws["name"], what="rank"):
                 ranked = sorted(rows.values(), key=lambda r: (-r["score"], r["id"]))
                 self.assertEqual([r["id"] for r in ranked], ws["rank"])
+
+    def test_page_labels_match_backlog_query_for_every_set(self):
+        # The vectors pin [key, points] only; this pins the label text too, so deck, length, tried and
+        # "in Up next" wording can't drift between the page and backlog_query.score_breakdown.
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import backlog_query as q
+        got = run_node("sets")
+        by_id = {v["id"]: v for v in VECTORS["vectors"]}
+        for ws in VECTORS["weightSets"]:
+            for row in got[ws["name"]]:
+                with self.subTest(set=ws["name"], vector=row["id"]):
+                    v = by_id[row["id"]]
+                    terms = q.score_breakdown(q.normalize(v["game"]), v["lane"], weights=ws["weights"])
+                    self.assertEqual(row["labeled"], [[t.term, t.label, t.points] for t in terms])
 
     def test_page_weight_constants_match_backlog_query(self):
         import sys
