@@ -1,6 +1,6 @@
 # Adjustable couch-score weights: design
 
-Status: draft for review, 2026-11-10. Nothing in this document is implemented yet.
+Status: approved 2026-11-10 (open questions resolved in §9). Nothing in this document is implemented yet.
 
 Read against: steam-backlog-triage `7468859` (main), mcp-server-steam-backlog `bd9202a` (main). Every line
 number below is from those commits.
@@ -101,13 +101,17 @@ UI. Recommendation: ship A, revisit if the split is wanted.
 
 ```
 WEIGHT_KEYS = ("play", "deck", "length", "metacritic", "deck_played", "controller", "next")
-WEIGHT_MIN = 0, WEIGHT_MAX = 3, WEIGHT_STEP = 0.25, WEIGHT_DEFAULT = 1
+WEIGHT_RANGE = {"play": (0, 3), "deck": (0, 3), "length": (0, 3), "metacritic": (0, 3),
+                "deck_played": (0, 3), "controller": (0, 3), "next": (0.5, 2)}
+WEIGHT_STEP = 0.25, WEIGHT_DEFAULT = 1
 ```
 
-- Every weight is a number in [0, 3] that is a multiple of 0.25 (13 slider positions).
+- Every weight is a multiple of 0.25 inside its key's range: [0, 3] for six terms (13 slider
+  positions), [0.5, 2] for `next` (7 positions).
 - No negative weights: a term never flips sign, so "unknown is never bad" (unknown adds 0) still holds
   and a penalty stays a penalty.
-- Weight 0 removes a term's effect. `next` at 0 means Up next gets no boost in picks.
+- Weight 0 removes a term's effect. `next` can't go to 0: Up next always adds at least +50 and at most
+  +200, so the lane keeps meaning "play soon" whatever else is tuned (decided 2026-11-10, Q5).
 
 These constants live in `backlog_query.py` and in `backlog.html`. A parity test compares the page's copy
 with the module's (§7, T3). The server validates with the module's.
@@ -139,7 +143,7 @@ weight is 1. Missing file: the same body with all 1s and `default: true`.
 - 200 `{"ok": true, "weights": {stored}, "previous": {before}}` with the new ETag, matching the other
   PUTs' `previous` convention.
 - 400 for: a body that isn't an object, `weights` not an object, an unknown key, a value that isn't a
-  finite JSON number (strings, booleans, null, NaN), out of range, or not a multiple of 0.25.
+  finite JSON number (strings, booleans, null, NaN), outside its key's range, or not a multiple of 0.25.
   Bodies over 4 KB are refused before parsing.
 - 403 for a cross-site request (the existing `refuse_cross_site()` runs first, as for every PUT).
 
@@ -191,7 +195,7 @@ on a 5xx or a timeout, because that would be exactly the disagreement this work 
 
 ### 5.3 `backlog.html`
 
-- Constants `WEIGHT_KEYS`, `WEIGHT_MIN/MAX/STEP` (parity-tested against the module), and state
+- Constants `WEIGHT_KEYS`, `WEIGHT_RANGE`, `WEIGHT_STEP` (parity-tested against the module), and state
   `S.weights` (saved) and `S.wDraft` (while tuning).
 - `scoreTerms(g)` returns `[[key, label, points], ...]` mirroring `score_breakdown()`; `score(g)` sums it.
   Both read one function, `liveWeights()`, which returns `S.wDraft || S.weights || DEFAULTS`. That is the
@@ -199,7 +203,7 @@ on a 5xx or a timeout, because that would be exactly the disagreement this work 
 - `bootServer()` fetches `api/prefs` with the triage, notes and order, keeping its ETag. A 404 (an older
   server) means defaults and no Tune control.
 - **Tune picks** (only when `canEdit()`; hidden in sample and artifact mode, which use defaults): a
-  button in the Couch picks heading opens a panel with one range input per term (0 to 3, step 0.25).
+  button in the Couch picks heading opens a panel with one range input per term (its `WEIGHT_RANGE`, step 0.25).
   Each shows its multiplier and what it does in points ("Deck ×1.5: Verified +45, Playable +21,
   Unsupported −67.5"). Dragging sets `S.wDraft` and re-renders the picks (once per animation frame).
   **Save** PUTs with If-Match, then re-renders the list and Next order. **Reset** sets the draft to all
@@ -235,14 +239,14 @@ on a 5xx or a timeout, because that would be exactly the disagreement this work 
    "rank": [32, 30, 9, ...]},
   {"name": "mixed", "weights": {"play": 0.5, "deck": 2, "length": 1.5, "metacritic": 0,
                                  "deck_played": 3, "controller": 0.25, "next": 0.75}, ...},
-  {"name": "zero", "weights": {all 0}, ...},
-  {"name": "max", "weights": {all 3}, ...}
+  {"name": "floor", "weights": {every key at its minimum: 0, and next 0.5}, ...},
+  {"name": "ceiling", "weights": {every key at its maximum: 3, and next 2}, ...}
 ]
 ```
 
   `terms` are `[key, points]` pairs (labels are allowed to differ between page and module); `rank` is
-  every vector's id sorted by score descending, ties by id (export order). The `zero` set makes every
-  score 0, which exercises the play-stays rule and the tie-break.
+  every vector's id sorted by score descending, ties by id (export order). The `floor` set scores every
+  game 0 except Up next ones (+50), which exercises the play-stays rule and the tie-break.
 
 ### 5.6 Docs
 
@@ -331,12 +335,10 @@ presets, `PROG_RULE`, `stats_for`, `history_row`, the MCP's `deck.py`.
 Between steps 1 and 2 deploying, the page and Ask follow saved weights and the deployed MCP doesn't.
 Until both are deployed, don't save non-default weights (the badge makes it obvious if you have).
 
-## 9. Open questions for review
+## 9. Decisions (2026-11-10)
 
-- **Q1 (main decision).** One multiplier per term (A, recommended), or also split never/tried (C)?
-- **Q2.** ProtonDB and reviews stay out, since they would be new terms. Agreed?
-- **Q3.** Move the vector generator to triage (`tests/gen_score_vectors.mjs`)? The alternative is a
-  generator change in the MCP repo first, which inverts V6's order.
-- **Q4.** No MCP or Ask tool to change weights. Agreed? (Read-only for both, as the page owns tuning.)
-- **Q5.** Range 0 to 3 for every term, including `next`? A narrower `next` range (say 0.5 to 2) would
-  keep Up next meaningful, but 0 is a legitimate "rank purely on fit" choice.
+- **Q1.** One multiplier per term (approach A). Never and tried are not split.
+- **Q2.** ProtonDB and reviews stay out; they would be new terms.
+- **Q3.** The vector generator moves to triage as `tests/gen_score_vectors.mjs`.
+- **Q4.** Neither Ask nor the MCP gets a tool to change weights; the page owns tuning.
+- **Q5.** `next` has a narrower range, 0.5 to 2. The other six terms run 0 to 3.
