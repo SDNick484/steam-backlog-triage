@@ -18,6 +18,7 @@ The dashboard then shows:
 - **Notes and order** (self-hosted only): add a note to any game, and reorder the *Up next* lane by dragging rows or with the *Move up* and *Move down* buttons. Both are saved on the server in `notes.json` and `order.json`.
 - **The full list:** search, plus a filter panel for genre (any or all), HowLongToBeat length (main, extras or completionist), ProtonDB tier, Metacritic minimum, release year, Deck status, controller support, play state, triage lane and notes. A **Progress** group filters on *In progress* (as above), *Started on Deck* (any Deck time) and *Not started* (never launched), and a **Where played** group on *Deck only*, *Mostly Deck* (half or more of the playtime), *Mostly elsewhere* and *Never on Deck*; picking several matches any of them (the URL key is `prog`). **Sort** also offers *Deck playtime*. Each filter has an *include unknown* option for games with no data. Filters combine with AND, and the state is kept in the URL, so a filtered view can be bookmarked. Couch picks respect the filters. There are also filters for publisher and developer (spellings such as "Devolver Digital" and "DEVOLVER DIGITAL, Inc." are grouped), a Metacritic maximum, Steam user review levels, a **Tags** filter (a searchable multi-select; a game with several tags matches any of the ones you pick) and *Only unknown* checkboxes that list the games with no data for a field.
 - **Statistics:** the *Stats* link in the header (or `/stats`) shows the same library as charts: games, time played and never-launched share by genre, publisher, developer, Deck rating, ProtonDB tier, controller support, length, triage lane, Metacritic, Steam reviews, release year and **Tags**. A *Played on Deck* tile shows how many games have Deck time, those hours and their share of all playtime, and a *Where played* card splits every game into Deck only, Mostly Deck, Mostly elsewhere, Never on Deck and Not played. It uses the same view, search and filters as the list, and the filters stay in the URL when you move between the two. Switch between games, hours played and % never launched; each row's strip splits its games into never launched, tried (under 2 h) and played (2 h or more). Click any row, "Unknown" rows included, to open the list with exactly those games. A game with several genres, publishers, developers or tags counts under each of them. *Copy as CSV* copies a card's table. An export made before publishers, developers, reviews or tags were collected still works: those cards say how many games they know ("Tags known for N of M"), and fill in after the next `--details` run.
+- **Trend:** when the server has recorded history, the top of the statistics page shows whether the pile is shrinking: backlog games and backlog hours remaining as lines (90 days, 1 year or all), games added to the library versus games closed (Done or Skip) by month, and a *Finished* list by year with each game's playtime. See [History](#history).
 
 **In progress is not the backlog.** The *Backlog* view, the picks and the backlog counts still mean "not played (under 2 h) and not in Skip or Done"; a game you have put 10 hours into can be in progress and is not in the backlog. Neither idea changes the couch score (`SCORING.md` is unchanged). Games with Deck time already earned a small couch-score bonus; that is separate. A game's Deck time comes from the export's `deckPlaytime` (always written by the exporter); one with none counts as *Never on Deck*.
 
@@ -33,6 +34,7 @@ Everything is standard-library Python, plus the optional [`howlongtobeatpy`](htt
 | `backlog_server.py` | Serves the dashboard and its small JSON API |
 | `backlog.html` | The dashboard page |
 | `backlog_query.py`, `access_jwt.py`, `ask.py` | Ask (AI search): the read-only backlog queries, Cloudflare Access token checks, and the question loop. Imported by the server at start-up, so keep them next to `backlog_server.py` |
+| `lane_log.jsonl`, `history.jsonl` | Not in the repo: the server writes them into the data directory (see [History](#history)) |
 | `SCORING.md` | How the couch score is computed (the spec other tools implement) |
 | `.gitattributes` | Marks `backlog_server.py` `export-subst`, so `git archive` fills in its build id |
 | `run-export.sh` | Wrapper for cron/systemd and the dashboard's **Refresh library** button; reads your keys from `~/.steam-env` and takes the export lock |
@@ -173,14 +175,32 @@ Every response carries `X-Backlog-Server: 1` and `X-Backlog-Api: 2` (and the hea
 | GET / PUT | `/api/triage` | Triage marks; PUT `{"appid": 620, "lane": "next"}` (`""` clears) |
 | GET / PUT | `/api/notes` | Notes; PUT `{"appid": 620, "note": "..."}` (`""` clears; up to 2,000 characters) |
 | GET / PUT | `/api/order` | Up next order; PUT `{"order": [620, 1145360]}` (distinct app ids) |
+| GET | `/api/history` | `{"days": [...], "lanes": [...]}`: the day rows and the lane changes the server has recorded (see [History](#history)). Read-only |
 | POST | `/api/export` | Start an export in the background: 202, or 409 if one is already running. The request needs `Content-Type: application/json` (415 otherwise) |
 | GET | `/api/export/status` | The running or last export: `state`, `phase`, `progress`, recent redacted log lines, and whether the library changed |
 | GET | `/api/run-status` | `run_status.json`: how the last export run ended (see [Stale or failed exports](#stale-or-failed-exports)), or `null` |
 | GET | `/healthz` | `ok`; with `?deep=1`, 200 or 503 and JSON: `ok`, `build`, `last_ok`, `age_seconds`, `consecutive_failures` |
 
-**ETags.** The library, triage, notes and order responses carry an `ETag`, and send `304 Not Modified` when you send a matching `If-None-Match`. A PUT to triage, notes or order may send `If-Match` with an ETag from an earlier GET; if the resource has changed since, the server answers `412` with the current ETag and writes nothing. Without `If-Match` a PUT works as it always did, which is how the page uses them. Each successful PUT also returns the value it replaced as `previous`.
+**ETags.** The library, triage, notes, order and history responses carry an `ETag`, and send `304 Not Modified` when you send a matching `If-None-Match`. A PUT to triage, notes or order may send `If-Match` with an ETag from an earlier GET; if the resource has changed since, the server answers `412` with the current ETag and writes nothing. Without `If-Match` a PUT works as it always did, which is how the page uses them. Each successful PUT also returns the value it replaced as `previous`.
 
 **Exports.** `POST /api/export` runs `run-export.sh` (or `--export-cmd PATH`) as a child process, one run at a time. The server never sees your keys; `run-export.sh` reads `~/.steam-env` itself, so the server's user needs a `HOME` that points at the directory holding it. A run takes a lock on `<data>/.export.lock`, so a cron export counts as a running export too: the status shows it with `origin: "external"`, and a POST gets 409. Cron and the server must therefore use the same data directory. Log lines in the status are redacted (SteamID, key parameters, paths, IP addresses); the full output stays in `export-last.log` in the data directory (mode 600). A run over `--export-timeout` seconds (default 10800) is stopped with SIGINT, then SIGTERM, then SIGKILL, so the exporter can save its cache. A server with no export command answers 501.
+
+## History
+
+The server keeps two small files in the data directory, next to `triage.json`, so the Statistics page can show whether the backlog is shrinking and what you finished. Nothing in them leaves the machine: they are only read by `GET /api/history` and the page. Ask and the MCP server do not see them.
+
+| File | One line is | Written |
+|---|---|---|
+| `lane_log.jsonl` | a lane change: `{"ts": 1767225600, "appid": 620, "from": "next", "to": "done"}` (`ts` is UTC seconds, `""` means no lane) | when a triage write changes a game's lane, whoever sent it (the page or the MCP server). A write that changes nothing logs nothing |
+| `history.jsonl` | a day: `date` (the server's local date), `games`, `never`, `tried`, `played`, `backlog`, `laneCounts`, `backlogHours`, `backlogWithTime`, `playHours` | after a lane change and after a library appears or changes: an export started from the page, one cron ran (the server looks every 30 seconds, `--library-poll SECONDS`, `0` turns it off) or a file loaded on the page. A second write the same day replaces that day's row |
+
+The counts are computed with the same rules as the page: *backlog* is not played (under 2 h) and not in Skip or Done, and `backlogHours` adds up the main-story times of those games, with `backlogWithTime` saying how many had a time. Starting the server writes nothing, so a day on which you neither triage nor export has no row.
+
+**Retention.** `history.jsonl` keeps a row per day for 2 years, then the last row of each month. `lane_log.jsonl` keeps the newest 50,000 lines. Both are rewritten whole (written to a temporary file, then renamed) when they are pruned, and a file that cannot be written is reported on stderr and never fails the triage write you just made.
+
+**Starts when you deploy.** There is no backfill: history begins the day this version first records something. Until 7 days are recorded the Trend section says "Collecting since <date>" and shows today's numbers instead of lines. The *Finished* list works from the first lane change; it lists games whose latest change was to Done and that are still Done. Day rows use the server's local midnight; the page shows lane changes in your browser's time zone. The library has no "date added" field, so *Added* is how much the library grew between recorded days.
+
+**Back up** (they are plain text, and not recoverable once lost): copy `lane_log.jsonl` and `history.jsonl` along with `triage.json`, `notes.json` and `order.json`, for example `cp -a ~/exports/*.json ~/exports/*.jsonl /path/to/backup/` (`~/exports` is the default data directory; use yours). To read the newest line of each: `tail -n 1 lane_log.jsonl history.jsonl`.
 
 ## AI search (Ask)
 
@@ -252,7 +272,7 @@ The product needs only the Python standard library. The tests use `unittest`, an
 # Server routes, export endpoints, exporter (against a mock Steam), run-export.sh, privacy scanner, score parity
 python3 -m unittest -v tests.test_server tests.test_export_endpoints tests.test_exporter \
   tests.test_run_export tests.test_privacy_scan tests.test_score_vectors tests.test_stats \
-  tests.test_backlog_query tests.test_access_jwt tests.test_ask tests.test_hardening
+  tests.test_backlog_query tests.test_access_jwt tests.test_ask tests.test_hardening tests.test_history
 
 # The page in a real browser (pip install -r tests/browser/requirements.txt && playwright install chromium)
 python3 -m unittest -v tests.browser.test_page tests.browser.test_filters tests.browser.test_stats_page \
