@@ -14,7 +14,7 @@ Standard library only. Serves:
   PUT  /api/notes       {"appid": 620, "note": "..."}  ("" clears; max 2000 characters)
   GET  /api/order       [appid, ...] order of the Up next lane
   GET  /api/prefs       {"weights": {...}, "default": bool}: the couch-score weights (prefs.json)
-  PUT  /api/prefs       {"weights": {"deck": 1.5}}  (absent keys reset to 1; max 4 KB)
+  PUT  /api/prefs       {"weights": {"deck": 1.5}}  (body required; absent keys reset to 1, {"weights": {}} resets all; max 4 KB)
   GET  /api/history     {"days": [...], "lanes": [...]}: one row of counts per day (history.jsonl) and every
                         lane change (lane_log.jsonl), oldest first; read-only, the server writes both files
   PUT  /api/order       {"order": [620, 1145360, ...]}  (a list of distinct app ids)
@@ -437,7 +437,7 @@ class App:
                 raw = json.load(f)
         except FileNotFoundError:
             return dict(backlog_query.DEFAULT_WEIGHTS)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             sys.stderr.write("prefs: prefs.json could not be read as JSON, using the default weights\n")
             return dict(backlog_query.DEFAULT_WEIGHTS)
         if not isinstance(raw, dict):
@@ -981,12 +981,12 @@ def make_handler(app: App):
                 return self.json(400, {"error": f"expected a JSON body of at most {PREFS_MAX_BODY} bytes"})
             try:
                 data = json.loads(self.rfile.read(n))
-            except ValueError:
+            except (ValueError, RecursionError):
                 return self.json(400, {"error": "body is not valid JSON"})
-            if not isinstance(data, dict):
-                return self.json(400, {"error": "expected a JSON object"})
+            if not isinstance(data, dict) or set(data) != {"weights"}:
+                return self.json(400, {"error": 'expected {"weights": {...}} and nothing else'})
             try:
-                stored = backlog_query.check_weights(data.get("weights", {}))
+                stored = backlog_query.check_weights(data["weights"])
             except backlog_query.QueryError as e:
                 return self.json(400, {"error": str(e)})
             with app.lock:

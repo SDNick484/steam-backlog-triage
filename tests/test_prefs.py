@@ -79,7 +79,8 @@ class PrefsTests(unittest.TestCase):
 
     def test_put_400s(self):
         bad = [[], {"weights": []}, {"weights": {"nope": 1}}, {"weights": {"deck": True}},
-               {"weights": {"next": 0}}, {"weights": {"deck": 0.3}}]
+               {"weights": {"next": 0}}, {"weights": {"deck": 0.3}},
+               {}, {"deck": 2}, {"weights": {}, "x": 1}]
         for body in bad:
             with self.subTest(body=body):
                 self.assertEqual(self.s.put("/api/prefs", body).status, 400)
@@ -87,7 +88,24 @@ class PrefsTests(unittest.TestCase):
         self.assertGreater(len(big), 4096)
         self.assertEqual(self.s.put("/api/prefs", big, {"Content-Type": "application/json"}).status, 400)
         self.assertEqual(self.s.put("/api/prefs", b"not json").status, 400)
+        nested = b"[" * 2000 + b"]" * 2000
+        self.assertLess(len(nested), 4096)
+        self.assertEqual(self.s.put("/api/prefs", nested).status, 400)
         self.assertFalse(self.file.exists())
+
+    def test_put_400_leaves_existing_file(self):
+        self.assertEqual(self.s.put("/api/prefs", {"weights": {"deck": 2}}).status, 200)
+        before = self.file.read_bytes()
+        for body in ({}, {"deck": 3}, {"weights": {}, "x": 1}):
+            with self.subTest(body=body):
+                self.assertEqual(self.s.put("/api/prefs", body).status, 400)
+                self.assertEqual(self.file.read_bytes(), before)
+
+    def test_nested_prefs_file_falls_back(self):
+        self.file.write_text("[" * 5000 + "]" * 5000)
+        self.assertEqual(self.s.get("/api/prefs").json(), {"weights": ALL_ONE, "default": True})
+        self.assertEqual(self.s.get("/healthz").status, 200)
+        self.assertTrue([ln for ln in self.s.log_text().splitlines() if ln.startswith("prefs:")])
 
     def test_cross_site_put_403(self):
         r = self.s.put("/api/prefs", {"weights": {"deck": 2}}, {"Sec-Fetch-Site": "cross-site"})
