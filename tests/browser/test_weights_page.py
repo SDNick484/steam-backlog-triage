@@ -106,6 +106,13 @@ class WeightsPageBase:
     def expected(self, weights) -> list[str]:
         return [g.name for g in q.picks(self.games, q.clean({}), {}, {}, weights=weights)[:6]]
 
+    @staticmethod
+    def wait_picks(page, names: list[str]) -> None:
+        """Wait until the picks show `names`. Slider moves and Reset re-render the picks on the next animation
+        frame, so read them only after that frame (a slow runner can take longer than the next test step)."""
+        page.wait_for_function("(o) => JSON.stringify([...document.querySelectorAll('#picks .pick h3')].map(e => e.textContent)) === o",
+                               arg=json.dumps(names, separators=(",", ":")))
+
     def puts(self):
         return [r for r in self.requests if r[0] == "PUT" and r[1].endswith("/api/prefs")]
 
@@ -144,8 +151,7 @@ class WeightsPageBase:
         page.fill("#w-deck", "3")
         page.fill("#w-metacritic", "0")
         changed = {**W, "deck": 3, "metacritic": 0}
-        page.wait_for_function("(o) => JSON.stringify([...document.querySelectorAll('#picks .pick h3')].map(e => e.textContent)) === o",
-                               arg=json.dumps(self.expected(changed), separators=(",", ":")))
+        self.wait_picks(page, self.expected(changed))
         self.assertEqual(self.picks(page), self.expected(changed))
         self.assertNotEqual(self.picks(page), saved)
         self.assertEqual(self.puts(), [])
@@ -184,6 +190,7 @@ class WeightsPageBase:
         page2.click("#tuneReset")
         for k in q.WEIGHT_KEYS:
             self.assertEqual(float(page2.input_value(f"#w-{k}")), 1.0)
+        self.wait_picks(page2, self.expected(q.DEFAULT_WEIGHTS))
         self.assertEqual(self.picks(page2), self.expected(q.DEFAULT_WEIGHTS))
         self.assertEqual(len(self.puts()), n)            # no PUT until Save
         page2.click("#tuneSave")
