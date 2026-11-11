@@ -64,7 +64,8 @@ jobs:
             tests.test_access_jwt \
             tests.test_ask \
             tests.test_hardening \
-            tests.test_history 2>&1 | tee unittest.log
+            tests.test_history \
+            tests.test_weights 2>&1 | tee unittest.log
       - name: Fail if any test was skipped
         shell: bash
         run: |
