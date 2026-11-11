@@ -442,7 +442,7 @@ def _weight_problem(key: str, v: Any) -> str | None:
     lo, hi = WEIGHT_RANGE[key]
     if not lo <= v <= hi:
         return f"out of range ({lo:g} to {hi:g})"
-    if not (v * 4).is_integer():
+    if not float(v * 4).is_integer():
         return f"not a multiple of {WEIGHT_STEP:g}"
     return None
 
