@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 TRIED_MIN = 120  # minutes; under this a launched game counts as "tried"
+YEAR_MIN, YEAR_MAX = 1950, 2100  # the year filter's range; a release year outside it is unknown
 
 LANES = ("next", "someday", "skip", "done")
 DECK_BY_NAME = {"verified": 3, "playable": 2, "unsupported": 1, "unknown": 0}
@@ -271,7 +272,9 @@ def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
         proton = Proton(tier=p_raw["tier"], total=_num(p_raw.get("total")) or 0)
     deck = raw.get("deck")
     controller = raw.get("controller")
-    year = _num(raw.get("year"))
+    raw_year = _num(raw.get("year"))
+    # A release year outside the year filter's range is bad data: unknown, like no year at all.
+    year = raw_year if raw_year is not None and YEAR_MIN <= raw_year <= YEAR_MAX else None
     appid = raw.get("appid")
     name = raw.get("name")
     r = raw.get("reviews")
@@ -298,7 +301,7 @@ def normalize(raw: Mapping[str, Any], index: int = 0) -> Game:
         controller=controller if controller in ("full", "partial") else None,
         proton=proton,
         has_proton="proton" in raw,
-        has_details=(isinstance(genres_raw, list) and len(genres_raw) > 0) or year is not None,
+        has_details=(isinstance(genres_raw, list) and len(genres_raw) > 0) or raw_year is not None,
         export_index=index,
         publishers=publishers, developers=developers,
         pub_keys=_keys(publishers), dev_keys=_keys(developers),

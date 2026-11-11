@@ -5,7 +5,7 @@ A self-hosted dashboard for working through a Steam backlog, with an eye on what
 An exporter pulls your Steam library and enriches every game with:
 - **Steam Deck compatibility**: Valve's Verified / Playable / Unsupported rating
 - **HowLongToBeat times**: main story and main + extras
-- **Store details** (optional): genres, Metacritic score, release year, controller support, publishers and developers
+- **Store details** (optional): genres, Metacritic score, release year, controller support, publishers and developers (a release year outside 1950–2100 is treated as unknown: it can only come from a damaged or hand-edited export)
 - **Steam user reviews** (optional, with the store details): review count, percent positive and Steam's label ("Very Positive")
 - **Store tags** (optional, with the store details): the labels players put on a game, such as Souls-like, Metroidvania or Roguelike. Each game keeps Steam's top 10 user tags by vote weight, in Steam's order, in a `tags` list of names (an empty list when unknown or when `--details` wasn't used). This sits beside `genres`, which is Valve's fixed list (Action, RPG, Indie, ...); neither replaces the other.
 - **ProtonDB**: the community compatibility tier (Native to Borked, or Pending) and how many reports it's based on

@@ -1123,6 +1123,8 @@ function sampleGames() {
 }
 function normalize(g) {
   const n = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+  // A release year outside the year filter's range (1950-2100) is bad data: unknown, like no year at all.
+  const year = n(g.year) !== null && g.year >= 1950 && g.year <= 2100 ? g.year : null;
   const h = g.hltb && typeof g.hltb === "object" ? { main: n(g.hltb.main), extra: n(g.hltb.extra), complete: n(g.hltb.complete) } : null;
   return {
     appid: Number(g.appid),
@@ -1134,7 +1136,7 @@ function normalize(g) {
     hltb: h && (h.main || h.extra) ? h : null,
     genres: Array.isArray(g.genres) ? g.genres.filter((x) => typeof x === "string").slice(0, 6) : [],
     metacritic: n(g.metacritic),
-    year: n(g.year),
+    year,
     controller: g.controller === "full" || g.controller === "partial" ? g.controller : null,
     proton: g.proton && typeof g.proton.tier === "string" ? { tier: g.proton.tier, total: n(g.proton.total) || 0 } : null,
     hasProton: Object.prototype.hasOwnProperty.call(g, "proton"),
