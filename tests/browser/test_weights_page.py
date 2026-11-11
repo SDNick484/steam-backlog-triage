@@ -32,7 +32,6 @@ except ImportError:  # pragma: no cover
 REQUIRE = os.environ.get("REQUIRE_BROWSER") == "1"
 # Tuned so the fixture's default and weighted pick orders differ (the test asserts that first).
 W = {"play": 1, "deck": 0, "length": 0, "metacritic": 3, "deck_played": 1, "controller": 1, "next": 1}
-LOAD404 = "Failed to load resource: the server responded with a status of 404"
 
 
 @unittest.skipIf(sync_playwright is None and not REQUIRE, "playwright is not installed")
@@ -58,6 +57,8 @@ class WeightsPageBase:
         self.lib = load_fixture_library()
         self.games = [q.normalize(g, i) for i, g in enumerate(self.lib["games"])]
         self.problems: list[str] = []
+        self.allow_status = None          # one expected api/prefs refusal (404 or 412) a test may allow
+        self.allowed: list[str] = []      # the console lines that allowance matched
         self.requests: list[tuple[str, str, dict]] = []
 
     def start(self, weights=None):
@@ -72,8 +73,7 @@ class WeightsPageBase:
 
     def open(self, expect_tune=True):
         page = self.context.new_page()
-        page.on("console", lambda m: self.problems.append(f"console {m.type}: {m.text}")
-                if m.type in ("error", "warning") and LOAD404 not in m.text else None)
+        page.on("console", self.on_console)
         page.on("pageerror", lambda e: self.problems.append(f"pageerror: {e}"))
         page.on("requestfailed", lambda r: self.problems.append(f"request failed: {r.url} {r.failure}"))
         page.on("request", lambda r: self.requests.append((r.method, r.url, r.headers)))
@@ -82,6 +82,17 @@ class WeightsPageBase:
         if expect_tune:
             page.wait_for_selector("#tuneBtn:not([hidden])", timeout=5000)
         return page
+
+    def on_console(self, m):
+        if m.type not in ("error", "warning"):
+            return
+        # The browser logs every non-2xx response. Only the one status a test allows, for /api/prefs, is let through.
+        if (self.allow_status and m.text.startswith("Failed to load resource")
+                and f"status of {self.allow_status}" in m.text
+                and (m.location.get("url") or "").endswith("/api/prefs")):
+            self.allowed.append(m.text)
+            return
+        self.problems.append(f"console {m.type}: {m.text}")
 
     def check_clean(self, page):
         self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 390)
@@ -182,6 +193,7 @@ class WeightsPageBase:
 
     def test_stale_tab_gets_412(self):
         self.start()
+        self.allow_status = 412
         a, b = self.open(), self.open()
         a.click("#tuneBtn"); a.fill("#w-deck", "2"); a.click("#tuneSave")
         a.wait_for_selector("#tunePanel", state="hidden")
@@ -193,11 +205,12 @@ class WeightsPageBase:
         saved = json.loads((self.server.data / "prefs.json").read_text())
         self.assertEqual(saved["weights"]["deck"], 2)
         self.assertEqual(self.picks(b), self.expected({**q.DEFAULT_WEIGHTS, "deck": 2}))
-        self.problems = [p for p in self.problems if "412" not in p]   # the expected refusal
+        self.assertEqual(len(self.allowed), 1)           # exactly the one expected refusal
         self.check_clean(b)
 
     def test_hidden_without_prefs_route(self):
         self.start(W)
+        self.allow_status = 404
         self.context.route("**/api/prefs", lambda r: r.fulfill(status=404, content_type="application/json",
                                                               body='{"error":"not found"}'))
         page = self.open(expect_tune=False)
@@ -205,6 +218,7 @@ class WeightsPageBase:
         self.assertFalse(page.is_visible("#tuneBtn"))
         self.assertFalse(page.is_visible("#wBadge"))
         self.assertEqual(self.picks(page), self.expected(q.DEFAULT_WEIGHTS))
+        self.assertEqual(len(self.allowed), 1)           # exactly the one expected 404
         self.check_clean(page)
 
 
