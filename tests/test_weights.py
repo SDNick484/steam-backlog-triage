@@ -22,7 +22,8 @@ class WeightTests(unittest.TestCase):
 
     def test_check_weights_rejects(self):
         for bad in ({"nope": 1}, {"deck": True}, {"deck": "2"}, {"deck": None}, {"deck": float("nan")},
-                    {"deck": 3.25}, {"deck": -0.25}, {"deck": 0.3}, {"next": 0}, {"next": 2.25}, [], "x"):
+                    {"deck": 3.25}, {"deck": -0.25}, {"deck": 0.3}, {"next": 0}, {"next": 2.25}, [], "x",
+                    {"deck": float("inf")}, {"deck": 10**400}, {"play": True}, {1: 1}):
             with self.subTest(bad=bad), self.assertRaises(q.QueryError):
                 q.check_weights(bad)
 
@@ -51,3 +52,21 @@ class WeightTests(unittest.TestCase):
         snap = q.Snapshot(games=[], weights=MIXED)
         out = q.overview_out(snap)
         self.assertEqual((out["score_weights"], out["score_weights_default"]), (MIXED, False))
+
+    def test_huge_int_is_a_query_error_not_overflow(self):
+        with self.assertRaises(q.QueryError):
+            q.check_weights({"deck": 10**400})
+        w, problems = q.clean_weights({"deck": 10**400})
+        self.assertEqual((w["deck"], problems), (1, ["deck: not a finite number"]))
+
+    def test_problem_text_carries_no_raw_key(self):
+        raw = "evil\nkey\x1b[31m"
+        with self.assertRaises(q.QueryError) as cm:
+            q.check_weights({raw: 1})
+        self.assertNotIn("evil", str(cm.exception))
+        self.assertIn("unknown weight key", str(cm.exception))
+        self.assertEqual(q.clean_weights({raw: 1, 7: 1})[1], ["unknown weight key"] * 2)
+
+    def test_negative_zero_is_normalised(self):
+        self.assertEqual(str(q.check_weights({"deck": -0.0})["deck"]), "0.0")
+        self.assertEqual(str(q.clean_weights({"deck": -0.0})[0]["deck"]), "0.0")

@@ -433,7 +433,11 @@ def _weight_problem(key: str, v: Any) -> str | None:
     """Why ``v`` is not a usable weight for ``key``, or None."""
     if type(v) not in (int, float):  # excludes bool
         return "not a number"
-    if not math.isfinite(v):
+    try:
+        finite = math.isfinite(v)
+    except OverflowError:  # an int too large for a float
+        finite = False
+    if not finite:
         return "not a finite number"
     lo, hi = WEIGHT_RANGE[key]
     if not lo <= v <= hi:
@@ -449,14 +453,14 @@ def check_weights(raw: Any) -> dict[str, float]:
         raise QueryError("weights must be an object keyed by term")
     for k in raw:
         if k not in WEIGHT_RANGE:
-            raise QueryError(f"unknown weight {str(k)[:40]!r}; allowed: {', '.join(WEIGHT_KEYS)}")
+            raise QueryError(f"unknown weight key; allowed: {', '.join(WEIGHT_KEYS)}")
     out: dict[str, float] = {}
     for k in WEIGHT_KEYS:
         v = raw.get(k, 1)
         why = _weight_problem(k, v)
         if why:
             raise QueryError(f"weight {k}: {why}")
-        out[k] = v
+        out[k] = v + 0.0 if isinstance(v, float) else v  # -0.0 becomes 0.0
     return out
 
 
@@ -465,7 +469,7 @@ def clean_weights(raw: Any) -> tuple[dict[str, float], list[str]]:
     problem per thing fixed."""
     if not isinstance(raw, dict):
         return dict(DEFAULT_WEIGHTS), ([] if raw is None else ["weights: not an object"])
-    problems = [f"{str(k)[:40]}: unknown" for k in raw if k not in WEIGHT_RANGE]
+    problems = ["unknown weight key" for k in raw if k not in WEIGHT_RANGE]
     out: dict[str, float] = {}
     for k in WEIGHT_KEYS:
         v = raw.get(k, 1)
@@ -473,7 +477,7 @@ def clean_weights(raw: Any) -> tuple[dict[str, float], list[str]]:
         if why:
             problems.append(f"{k}: {why.split(' (')[0]}")
             v = 1
-        out[k] = v
+        out[k] = v + 0.0 if isinstance(v, float) else v
     return out, problems
 
 
