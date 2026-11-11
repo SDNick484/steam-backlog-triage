@@ -1247,6 +1247,7 @@ class Snapshot:
     notes: dict[int, str] = field(default_factory=dict)
     order: list[int] = field(default_factory=list)
     exported_at: str | None = None
+    # Defaulted only because Snapshot is built positionally (tests, the MCP's domain.stats); every scoring path must pass real weights.
     weights: Weights = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
 
 
