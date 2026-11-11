@@ -192,6 +192,33 @@ class WeightsPageBase:
         self.assertFalse(page2.is_visible("#wBadge"))
         self.check_clean(page2)
 
+    def test_sliders_and_reset_are_locked_while_saving(self):
+        self.start()
+        page = self.open()
+        page.click("#tuneBtn")
+        page.fill("#w-deck", "2")
+        # Hold the PUT in the page until released, so the in-flight state can be inspected.
+        page.evaluate("""() => {
+            const real = window.fetch.bind(window);
+            window.__release = null;
+            const gate = new Promise((res) => { window.__release = res; });
+            window.fetch = (u, o) => (o && o.method === "PUT") ? gate.then(() => real(u, o)) : real(u, o);
+        }""")
+        page.click("#tuneSave")
+        page.wait_for_function("document.getElementById('tuneSave').disabled")
+        self.assertTrue(page.is_disabled("#tuneReset"))
+        for k in q.WEIGHT_KEYS:
+            self.assertTrue(page.is_disabled(f"#w-{k}"), k)
+        page.evaluate("window.__release()")
+        page.wait_for_selector("#tunePanel", state="hidden")
+        self.assertEqual(len(self.puts()), 1)
+        page.click("#tuneBtn")
+        for k in q.WEIGHT_KEYS:
+            self.assertFalse(page.is_disabled(f"#w-{k}"), k)
+        self.assertFalse(page.is_disabled("#tuneReset"))
+        self.assertFalse(page.is_disabled("#tuneSave"))
+        self.check_clean(page)
+
     def test_stale_tab_gets_412(self):
         self.start()
         self.allow_status = 412

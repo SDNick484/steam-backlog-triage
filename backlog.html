@@ -2707,10 +2707,15 @@ function schedulePicks() {
   if (tuneFrame) return;
   tuneFrame = requestAnimationFrame(() => { tuneFrame = 0; renderPicks(); });
 }
+// While a Save is in flight the sliders and Reset are locked, so a move can't be lost to the older draft being saved.
+function setTuneBusy(busy) {
+  $("tuneSave").disabled = busy;
+  $("tuneReset").disabled = busy;
+  for (const el of $("tuneGrid").querySelectorAll("input")) el.disabled = busy;
+}
 async function savePrefs() {
   if (!S.wDraft) return;
-  const btn = $("tuneSave");
-  btn.disabled = true;
+  setTuneBusy(true);
   $("tuneMsg").textContent = "Saving...";
   try {
     const headers = { "Content-Type": "application/json" };
@@ -2734,7 +2739,7 @@ async function savePrefs() {
     $("tuneBtn").focus();
   } catch (e) {
     $("tuneMsg").textContent = "Couldn't save the weights. Your changes are kept; try again in a moment.";
-  } finally { btn.disabled = false; }
+  } finally { setTuneBusy(false); }
 }
 $("tuneBtn").addEventListener("click", () => { if ($("tunePanel").hidden) openTune(); else cancelTune(); });
 $("tuneSave").addEventListener("click", savePrefs);
