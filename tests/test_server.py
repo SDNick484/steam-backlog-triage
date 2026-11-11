@@ -743,6 +743,7 @@ class ReadmeRouteTable(unittest.TestCase):
         covered = {("GET", "/"), ("GET", "/stats"), ("GET", "/api/library"), ("PUT", "/api/library"), ("GET", "/api/triage"),
                    ("PUT", "/api/triage"), ("GET", "/api/notes"), ("PUT", "/api/notes"), ("GET", "/api/order"),
                    ("PUT", "/api/order"), ("GET", "/healthz"),
+                   ("GET", "/api/prefs"), ("PUT", "/api/prefs"),  # test_prefs.py
                    ("POST", "/api/export"), ("GET", "/api/export/status"),  # these two: test_export_endpoints.py
                    ("GET", "/api/run-status"),  # test_hardening.py
                    ("GET", "/api/history")}  # test_history.py

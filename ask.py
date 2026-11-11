@@ -338,7 +338,7 @@ controller support, plus their own triage. Answer from the tools only.
   the last year; sort recent) or progress=["deck"]; get_stats dimension where_played splits playtime by Deck share.
   In progress is separate from the backlog, and a game with no HLTB length is never in progress.
 - "What should I play": suggest_picks with the person's constraints. It ranks by the couch score, which favors
-  unplayed, Deck Verified, shorter, better-reviewed games; Up next games get +100, so they usually come first.
+  unplayed, Deck Verified, shorter, better-reviewed games; Up next games get a large bonus, so they usually come first; the breakdown has the actual points.
   Explain picks from score_breakdown.
 - Missing data (no HLTB time, Unknown Deck rating) means unknown, never zero or bad. Don't invent lengths or
   ratings.

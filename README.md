@@ -175,6 +175,8 @@ Every response carries `X-Backlog-Server: 1` and `X-Backlog-Api: 2` (and the hea
 | GET / PUT | `/api/triage` | Triage marks; PUT `{"appid": 620, "lane": "next"}` (`""` clears) |
 | GET / PUT | `/api/notes` | Notes; PUT `{"appid": 620, "note": "..."}` (`""` clears; up to 2,000 characters) |
 | GET / PUT | `/api/order` | Up next order; PUT `{"order": [620, 1145360]}` (distinct app ids) |
+| GET | `/api/prefs` | The couch-score weights: {"weights": {...}, "default": bool} |
+| PUT | `/api/prefs` | {"weights": {"deck": 1.5}}; absent keys reset to 1; If-Match honored |
 | GET | `/api/history` | `{"days": [...], "lanes": [...]}`: the day rows and the lane changes the server has recorded (see [History](#history)). Read-only |
 | POST | `/api/export` | Start an export in the background: 202, or 409 if one is already running. The request needs `Content-Type: application/json` (415 otherwise) |
 | GET | `/api/export/status` | The running or last export: `state`, `phase`, `progress`, recent redacted log lines, and whether the library changed |
@@ -184,6 +186,8 @@ Every response carries `X-Backlog-Server: 1` and `X-Backlog-Api: 2` (and the hea
 **ETags.** The library, triage, notes, order and history responses carry an `ETag`, and send `304 Not Modified` when you send a matching `If-None-Match`. A PUT to triage, notes or order may send `If-Match` with an ETag from an earlier GET; if the resource has changed since, the server answers `412` with the current ETag and writes nothing. Without `If-Match` a PUT works as it always did, which is how the page uses them. Each successful PUT also returns the value it replaced as `previous`.
 
 **Exports.** `POST /api/export` runs `run-export.sh` (or `--export-cmd PATH`) as a child process, one run at a time. The server never sees your keys; `run-export.sh` reads `~/.steam-env` itself, so the server's user needs a `HOME` that points at the directory holding it. A run takes a lock on `<data>/.export.lock`, so a cron export counts as a running export too: the status shows it with `origin: "external"`, and a POST gets 409. Cron and the server must therefore use the same data directory. Log lines in the status are redacted (SteamID, key parameters, paths, IP addresses); the full output stays in `export-last.log` in the data directory (mode 600). A run over `--export-timeout` seconds (default 10800) is stopped with SIGINT, then SIGTERM, then SIGKILL, so the exporter can save its cache. A server with no export command answers 501.
+
+The couch-score weights are saved in `prefs.json` in the data directory; the server is its only writer. A missing file means every weight is 1, and a file that can't be read, or a weight in it that isn't valid, is replaced by 1 (with one line in the server log naming what was wrong). Ask ranks with the saved weights.
 
 ## History
 

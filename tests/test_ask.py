@@ -645,6 +645,34 @@ class AskTests(AskServerBase):
         _, err = ask.run_tool(snap, "find_games", {"progress": ["bogus"]})
         self.assertIn("progress must be", err)
 
+    def test_tools_use_saved_weights(self):
+        from tests.test_weights import MIXED
+        path = self.data / "prefs.json"
+        path.write_text(json.dumps({"version": 1, "weights": MIXED}), encoding="utf-8")
+        self.addCleanup(path.unlink, missing_ok=True)
+        snap = self.app.ask_snapshot()
+        self.assertEqual(dict(snap.weights), MIXED)
+        by_id = {g.appid: g for g in snap.games}
+        name = snap.games[0].name
+        calls = (("find_games", {}, lambda o: o["games"]), ("get_game", {"game": name}, lambda o: [o["game"]]),
+                 ("suggest_picks", {}, lambda o: o["picks"]), ("get_next_queue", {}, lambda o: o["queue"]))
+        differs = False
+        for tool, args, rows in calls:
+            with self.subTest(tool=tool):
+                out, err = ask.run_tool(snap, tool, args)
+                self.assertIsNone(err)
+                got = rows(out)
+                self.assertTrue(got)
+                for row in got:
+                    g = by_id[row["appid"]]
+                    lane = bq.lane_of(g, snap.triage)
+                    self.assertEqual(row["score"], bq.score(g, lane, weights=MIXED))
+                    differs |= row["score"] != bq.score(g, lane, weights=bq.DEFAULT_WEIGHTS)
+        self.assertTrue(differs, "no score differs from the defaults, so the test proves nothing")
+
+    def test_system_prompt_has_no_fixed_next_bonus(self):
+        self.assertNotIn("+100", ask.SYSTEM)
+
     def test_run_tool_checks(self):
         snap = self.app.ask_snapshot()
         self.assertEqual(ask.run_tool(snap, "nope", {}), (None, "Unknown tool: nope"))

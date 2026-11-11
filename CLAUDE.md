@@ -14,7 +14,7 @@ Up next order) and serves the page and its JSON API. Sibling repos: `steam-wishl
 - `backlog.html`: the whole dashboard in one file. List, `/stats` and `/ask` modes share the filters and the URL
   hash. Holds `score()`, `passes()`, `statsFor()`
 - `backlog_server.py`: stdlib HTTP server. Serves the page, the JSON API (`API_VERSION`), export start/status
-  and the Ask routes. **The only writer of `triage.json`, `notes.json` and `order.json`**
+  and the Ask routes. **The only writer of `triage.json`, `notes.json`, `order.json` and `prefs.json`**
 - `backlog_query.py`: stdlib mirror of the page's rules (play state, filters, couch score, stats) for Ask
 - `ask.py`: Ask (AI search): a read-only tool loop over `backlog_query.py`. `access_jwt.py`: Cloudflare Access
   JWT verification, stdlib
@@ -43,7 +43,7 @@ Up next order) and serves the page and its JSON API. Sibling repos: `steam-wishl
   `/api/run-status`, `/healthz?deep=1` and the page's banner. Its shape is shared with steam-wishlist-deals: change
   it in both. `BUILD_STAMP` in `backlog_server.py` is filled by `git archive` (`.gitattributes`) or by the installer;
   never write a real hash into the checkout.
-- **Nothing writes triage, notes or order except `backlog_server.py`**, under its lock with `atomic_write`.
+- **Nothing writes triage, notes, order or prefs except `backlog_server.py`**, under its lock with `atomic_write`.
   Not the exporter, not Ask, not the MCP server.
 - **Ask is read-only.** No tool changes lanes, notes, order or the library, or starts an export. The
   Anthropic key lives in `ask.env`, never in `.steam-env`. Never send the SteamID, persona name, paths or
