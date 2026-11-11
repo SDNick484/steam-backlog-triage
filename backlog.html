@@ -558,6 +558,11 @@ const LANES = [
 ];
 const LANE_NAMES = { next: "Up next", someday: "Someday", skip: "Skipped", done: "Finished" };
 const TRIED_MIN = 120;
+// Couch-score weights (SCORING.md 3a): each term's points are multiplied by its weight. Mirrors backlog_query.py.
+const WEIGHT_KEYS = ["play", "deck", "length", "metacritic", "deck_played", "controller", "next"];
+const WEIGHT_RANGE = { play: [0, 3], deck: [0, 3], length: [0, 3], metacritic: [0, 3], deck_played: [0, 3], controller: [0, 3], next: [0.5, 2] };
+const WEIGHT_STEP = 0.25;
+const DEFAULT_W = Object.freeze({ play: 1, deck: 1, length: 1, metacritic: 1, deck_played: 1, controller: 1, next: 1 });
 // The Ask pill's icon (Cookbook Collection's CHAT_ICON).
 const CHAT_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9a1.5 1.5 0 0 1-1.5 1.5h-8.5L6 20v-3.5H5A1.5 1.5 0 0 1 3.5 15V6A1.5 1.5 0 0 1 5 4.5z"/></svg>`;
 const CHAT_FAIL = "AI search is unavailable right now, try again";
@@ -621,6 +626,8 @@ const MODE = /\/ask\/?$/.test(location.pathname) ? "ask" : /\/stats\/?$/.test(lo
 const BASE = MODE === "list" ? "" : location.pathname.replace(/(stats|ask)\/?$/, "");
 const API = (path) => BASE + path;
 const S = {
+  weights: null,             // saved score weights (null until loaded; see liveWeights)
+  wDraft: null,              // weights being tuned (null unless tuning)
   games: [],
   byId: new Map(),
   source: "sample",          // sample | local | db
@@ -1161,17 +1168,32 @@ const inProgress = (g) => g.playtime > 0 && !isClosed(g) && !!mainH(g) && g.play
   g.lastPlayed > 0 && Date.now() / 1000 - g.lastPlayed <= PROG_RULE.recentDays * 86400;
 const progMatch = (g, k) => (k === "inprog" ? inProgress(g) : k === "deck" ? g.deckPlaytime > 0 : whereKey(g) === k);
 
+// The one place the page reads a weight: the draft while tuning, else the saved weights, else all 1.
+function liveWeights() { return S.wDraft || S.weights || DEFAULT_W; }
+// score() term by term: [key, label, points]. Zero terms are left out (play stays); "+ 0" turns -0 into 0.
+// Same terms, order and labels as backlog_query.score_breakdown.
+function scoreTerms(g) {
+  const w = liveWeights();
+  const out = [];
+  const add = (key, label, base, keep) => {
+    const pts = base * w[key] + 0;
+    if (pts || keep) out.push([key, label, pts]);
+  };
+  const st = playState(g);
+  add("play", { never: "never played", tried: "tried (under 2 h)", played: "played 2 h+" }[st],
+    st === "never" ? 30 : st === "tried" ? 22 : -20, true);
+  add("deck", { 3: "Verified", 2: "Playable", 1: "Unsupported", 0: "Unknown" }[g.deck], { 3: 30, 2: 14, 0: 0, 1: -45 }[g.deck]);
+  const h = mainH(g);
+  if (h) add("length", `${h} h`, h <= 5 ? 24 : h <= 12 ? 18 : h <= 25 ? 9 : h <= 50 ? 0 : -10);
+  if (g.metacritic) add("metacritic", `MC ${g.metacritic}`, (g.metacritic - 75) / 2);
+  if (g.deckPlaytime > 0) add("deck_played", "played on the Deck", 5);
+  if (g.controller === "full") add("controller", "full controller support", 4);
+  if (lane(g) === "next") add("next", "in Up next", 100);
+  return out;
+}
 function score(g) {
   let s = 0;
-  const st = playState(g);
-  s += st === "never" ? 30 : st === "tried" ? 22 : -20;
-  s += { 3: 30, 2: 14, 0: 0, 1: -45 }[g.deck];
-  const h = mainH(g);
-  if (h) s += h <= 5 ? 24 : h <= 12 ? 18 : h <= 25 ? 9 : h <= 50 ? 0 : -10;
-  if (g.metacritic) s += (g.metacritic - 75) / 2;
-  if (g.deckPlaytime > 0) s += 5;
-  if (g.controller === "full") s += 4;
-  if (lane(g) === "next") s += 100;
+  for (const t of scoreTerms(g)) s += t[2];
   return s;
 }
 

@@ -323,6 +323,22 @@ class ScoreVectors(unittest.TestCase):
                 self.assertAlmostEqual(sum(t.points for t in terms), exp["score"], delta=1e-9)
                 self.assertTrue(all(t.points != 0 for t in terms if t.term != "play"))
 
+    def test_weight_sets(self):
+        by_id = {v["id"]: v for v in VECTORS["vectors"]}
+        for ws in VECTORS["weightSets"]:
+            scores = {}
+            for want in ws["expected"]:
+                with self.subTest(set=ws["name"], vector=want["id"]):
+                    v = by_id[want["id"]]
+                    g = q.normalize(v["game"])
+                    terms = q.score_breakdown(g, v["lane"], weights=ws["weights"])
+                    self.assertEqual([[t.term, t.points] for t in terms], want["terms"])
+                    s = q.score(g, v["lane"], weights=ws["weights"])
+                    self.assertAlmostEqual(s, want["score"], delta=1e-9)
+                    scores[want["id"]] = s
+            with self.subTest(set=ws["name"], what="rank"):
+                self.assertEqual(sorted(scores, key=lambda i: (-scores[i], i)), ws["rank"])
+
 
 # ---------------------------------------------------------------- filter parity with the page
 STATES = [
