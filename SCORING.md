@@ -64,8 +64,11 @@ the breakdown (`play` always stays), and `base × weight + 0` turns a `-0` into 
 
 Exactness: base points are small integers or halves (`(metacritic − 75) / 2`), and weights are multiples
 of 0.25, so each product is exactly representable in IEEE-754 doubles and both implementations compute
-bit-identical terms. Sums can still differ in the last bits by order, which is why scores are compared
-with the `1e-9` tolerance and the order of terms is fixed.
+bit-identical terms. Every weighted term is therefore a multiple of 1/8 (a half-point base times a
+quarter-step weight) and the sums stay small, far below 2^50, so each partial sum is exact too: the
+total does not depend on the order of the terms, and rank ties break the same way in JS and Python. The
+design relies on that. The `1e-9` tolerance in the vector checks is kept only from the older unweighted
+vectors; the order of terms is still fixed.
 
 ## 4. Ranking
 
@@ -73,7 +76,9 @@ with the `1e-9` tolerance and the order of terms is fixed.
   sorted by score descending; ties keep **export order** (the page's sort is stable, and the
   exporter writes games sorted by lower-cased name). Top 6.
 - **List sort "score":** score descending, ties by name (`localeCompare`).
-- The `next` bonus makes Up-next games rank first **in practice, not by rule**. The highest
+- The `next` bonus makes Up-next games rank first **in practice, not by rule**. The figures below are
+  for the default weights; with custom weights the bonus can be as low as +50 (`next` 0.5), and the
+  highest score without it reaches 316.5 at the ceiling set. The highest
   score without it is 30 + 30 + 24 + 12.5 + 5 + 4 = 105.5 (never played, Verified, ≤ 5 h,
   Metacritic 100, played on the Deck, full controller). The lowest Up-next game still in the
   backlog is 22 − 45 − 10 + (MC − 75)/2 + 100, which is 67 at Metacritic 75. So a weak Up-next
