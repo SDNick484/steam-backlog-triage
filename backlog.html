@@ -144,6 +144,19 @@ table.heat{border-collapse:separate;border-spacing:3px;width:100%;min-width:440p
 .chip{font-size:12px;font-weight:500;padding:3px 8px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);white-space:nowrap}
 .chip.hl{background:var(--accent-soft);color:var(--accent-ink)}
 .pick .spacer{flex:1}
+.pick .terms{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.h-line{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.chip[hidden]{display:none}
+.tune[hidden]{display:none}
+.tune-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:14px 22px}
+.tune-row{display:flex;flex-direction:column;gap:4px;min-width:0}
+.tune-row .tr-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.tune-row label{font-size:13.5px;font-weight:600}
+.tune-row output{font-size:13px;font-weight:600;color:var(--accent-ink)}
+.tune-row input[type=range]{width:100%;min-height:28px;accent-color:var(--accent);margin:0}
+.tune-row .whint{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.tune-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.tune-msg{font-size:13px;color:var(--ink-2);min-width:0;overflow-wrap:anywhere}
 .lenbar{display:flex;flex-direction:column;gap:4px}
 .lenbar .track{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden;display:flex;gap:2px}
 .lenbar .track span{height:100%;background:var(--accent)}
@@ -434,8 +447,22 @@ footer{font-size:12.5px;color:var(--muted);max-width:90ch}
   <section class="only-list" id="picksSec" style="display:flex;flex-direction:column;gap:14px" aria-labelledby="picksH">
     <div class="section-head">
       <div style="display:flex;flex-direction:column;gap:4px">
-        <h2 id="picksH">Couch picks</h2>
-        <p class="sub">The six best backlog candidates for the Deck, ranked by: never or barely played, Deck Verified or Playable, shorter HowLongToBeat time, higher Metacritic. Games you mark <b>Next</b> come first.</p>
+        <div class="h-line"><h2 id="picksH">Couch picks</h2><span class="chip hl" id="wBadge" hidden>Custom weights</span></div>
+        <p class="sub">The six best backlog candidates for the Deck, ranked by: never or barely played, Deck Verified or Playable, shorter HowLongToBeat time, higher Metacritic. Up next games get a large bonus.</p>
+      </div>
+      <button type="button" class="btn" id="tuneBtn" hidden aria-expanded="false" aria-controls="tunePanel">Tune picks</button>
+    </div>
+    <div class="panel tune" id="tunePanel" role="group" aria-labelledby="tuneH" hidden>
+      <div class="panel-head">
+        <h3 id="tuneH">Tune picks</h3>
+        <p>Each slider multiplies one part of the couch score: 0 switches it off, 1 is the default. The picks re-rank as you drag; nothing is saved until you press Save.</p>
+      </div>
+      <div class="tune-grid" id="tuneGrid"></div>
+      <div class="tune-actions">
+        <button type="button" class="btn primary" id="tuneSave">Save</button>
+        <button type="button" class="btn" id="tuneReset">Reset to defaults</button>
+        <button type="button" class="btn" id="tuneCancel">Cancel</button>
+        <span class="tune-msg" id="tuneMsg" role="status" aria-live="polite"></span>
       </div>
     </div>
     <div class="picks" id="picks"></div>
@@ -558,6 +585,11 @@ const LANES = [
 ];
 const LANE_NAMES = { next: "Up next", someday: "Someday", skip: "Skipped", done: "Finished" };
 const TRIED_MIN = 120;
+// Couch-score weights (SCORING.md 3a): each term's points are multiplied by its weight. Mirrors backlog_query.py.
+const WEIGHT_KEYS = ["play", "deck", "length", "metacritic", "deck_played", "controller", "next"];
+const WEIGHT_RANGE = { play: [0, 3], deck: [0, 3], length: [0, 3], metacritic: [0, 3], deck_played: [0, 3], controller: [0, 3], next: [0.5, 2] };
+const WEIGHT_STEP = 0.25;
+const DEFAULT_W = Object.freeze({ play: 1, deck: 1, length: 1, metacritic: 1, deck_played: 1, controller: 1, next: 1 });
 // The Ask pill's icon (Cookbook Collection's CHAT_ICON).
 const CHAT_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9a1.5 1.5 0 0 1-1.5 1.5h-8.5L6 20v-3.5H5A1.5 1.5 0 0 1 3.5 15V6A1.5 1.5 0 0 1 5 4.5z"/></svg>`;
 const CHAT_FAIL = "AI search is unavailable right now, try again";
@@ -621,6 +653,10 @@ const MODE = /\/ask\/?$/.test(location.pathname) ? "ask" : /\/stats\/?$/.test(lo
 const BASE = MODE === "list" ? "" : location.pathname.replace(/(stats|ask)\/?$/, "");
 const API = (path) => BASE + path;
 const S = {
+  weights: null,             // saved score weights (null until loaded; see liveWeights)
+  prefsOn: false,            // true once api/prefs answered 200 with well-formed weights (self-hosted only)
+  prefsEtag: null,           // its ETag, sent back as If-Match on save
+  wDraft: null,              // weights being tuned (null unless tuning)
   games: [],
   byId: new Map(),
   source: "sample",          // sample | local | db
@@ -1161,17 +1197,32 @@ const inProgress = (g) => g.playtime > 0 && !isClosed(g) && !!mainH(g) && g.play
   g.lastPlayed > 0 && Date.now() / 1000 - g.lastPlayed <= PROG_RULE.recentDays * 86400;
 const progMatch = (g, k) => (k === "inprog" ? inProgress(g) : k === "deck" ? g.deckPlaytime > 0 : whereKey(g) === k);
 
+// The one place the page reads a weight: the draft while tuning, else the saved weights, else all 1.
+function liveWeights() { return S.wDraft || S.weights || DEFAULT_W; }
+// score() term by term: [key, label, points]. Zero terms are left out (play stays); "+ 0" turns -0 into 0.
+// Same terms, order and labels as backlog_query.score_breakdown.
+function scoreTerms(g) {
+  const w = liveWeights();
+  const out = [];
+  const add = (key, label, base, keep) => {
+    const pts = base * w[key] + 0;
+    if (pts || keep) out.push([key, label, pts]);
+  };
+  const st = playState(g);
+  add("play", { never: "never played", tried: "tried (under 2 h)", played: "played 2 h+" }[st],
+    st === "never" ? 30 : st === "tried" ? 22 : -20, true);
+  add("deck", { 3: "Verified", 2: "Playable", 1: "Unsupported", 0: "Unknown" }[g.deck], { 3: 30, 2: 14, 0: 0, 1: -45 }[g.deck]);
+  const h = mainH(g);
+  if (h) add("length", `${h} h`, h <= 5 ? 24 : h <= 12 ? 18 : h <= 25 ? 9 : h <= 50 ? 0 : -10);
+  if (g.metacritic) add("metacritic", `MC ${g.metacritic}`, (g.metacritic - 75) / 2);
+  if (g.deckPlaytime > 0) add("deck_played", "played on the Deck", 5);
+  if (g.controller === "full") add("controller", "full controller support", 4);
+  if (lane(g) === "next") add("next", "in Up next", 100);
+  return out;
+}
 function score(g) {
   let s = 0;
-  const st = playState(g);
-  s += st === "never" ? 30 : st === "tried" ? 22 : -20;
-  s += { 3: 30, 2: 14, 0: 0, 1: -45 }[g.deck];
-  const h = mainH(g);
-  if (h) s += h <= 5 ? 24 : h <= 12 ? 18 : h <= 25 ? 9 : h <= 50 ? 0 : -10;
-  if (g.metacritic) s += (g.metacritic - 75) / 2;
-  if (g.deckPlaytime > 0) s += 5;
-  if (g.controller === "full") s += 4;
-  if (lane(g) === "next") s += 100;
+  for (const t of scoreTerms(g)) s += t[2];
   return s;
 }
 
@@ -1407,6 +1458,7 @@ function pickCard(g, i, why) {
     ${why ? `<p class="why">${esc(why)}</p>` : ""}
     ${lenBar(g)}
     <div class="chips">${chips}</div>
+    <p class="terms">${esc(scoreTerms(g).map((t) => `${t[1]} ${signed(t[2])}`).join(" · "))}</p>
     <div class="spacer"></div>
     ${laneButtons(g, false)}
   </article>`;
@@ -1495,6 +1547,7 @@ function renderContinue() {
 }
 
 function renderPicks() {
+  syncTune();
   const top = S.games.filter((g) => inBacklog(g) && passes(g)).sort((a, b) => score(b) - score(a)).slice(0, 6);
   const msg = activeCount() ? "No backlog games match these filters." : "Nothing left in the backlog. Everything is played, skipped or finished.";
   $("picks").innerHTML = top.length ? top.map((g, i) => pickCard(g, i)).join("") :
@@ -2547,6 +2600,7 @@ async function bootServer() {
     const o = await fetch(API("api/order"), { cache: "no-store" });
     if (o.ok) { const arr = await o.json(); if (Array.isArray(arr)) S.order = arr.map(Number); }
   } catch (e) {}
+  await loadPrefs();
   await loadRunStatus();
   if (r.ok) {
     const data = await r.json();
@@ -2568,6 +2622,147 @@ async function bootServer() {
   initRefresh();
   return true;
 }
+
+// ---------------------------------------------------------------- tune picks (self-hosted only)
+// The weights live in prefs.json on the server (api/prefs). The panel edits S.wDraft; every score reads
+// liveWeights(), so the picks re-rank while you drag and Cancel simply drops the draft. Nothing is sent until Save.
+const WEIGHT_UI = {
+  play: ["Play history", [["never", 30], ["tried", 22], ["played", -20]]],
+  deck: ["Deck rating", [["Verified", 30], ["Playable", 14], ["Unsupported", -45]]],
+  length: ["Length", [["5 h or less", 24], ["up to 12 h", 18], ["up to 25 h", 9], ["over 50 h", -10]]],
+  metacritic: ["Metacritic", [["MC 95", 10], ["MC 55", -10]]],
+  deck_played: ["Played on the Deck", [["any Deck time", 5]]],
+  controller: ["Controller support", [["full support", 4]]],
+  next: ["Up next bonus", [["in Up next", 100]]],
+};
+// "+30" / "-67.5" (ASCII, like Python's f"{p:+g}") for the card line; the slider hints use a real minus sign.
+const signed = (p) => (p < 0 ? "-" : "+") + Math.abs(p);
+const hintSigned = (p) => (p < 0 ? "\u2212" : "+") + Math.abs(p);
+const isDefaultW = (w) => WEIGHT_KEYS.every((k) => w[k] === 1);
+const fmtW = (v) => "\u00d7" + v;
+function weightHint(key, v) {
+  return WEIGHT_UI[key][1].map(([l, base]) => `${l} ${hintSigned(+(base * v + 0).toFixed(3))}`).join(", ");
+}
+
+async function loadPrefs() {
+  S.prefsOn = false;
+  try {
+    const r = await fetch(API("api/prefs"), { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const b = await r.json();
+    const w = b && b.weights;
+    if (!w || typeof w !== "object" || !WEIGHT_KEYS.every((k) => Number.isFinite(w[k]))) throw new Error("bad body");
+    S.weights = Object.fromEntries(WEIGHT_KEYS.map((k) => [k, w[k]]));
+    S.prefsEtag = r.headers.get("ETag");
+    S.prefsOn = true;
+  } catch (e) { S.weights = null; S.prefsEtag = null; S.wDraft = null; }
+}
+
+function syncTune() {
+  const on = canEdit() && S.prefsOn;
+  $("tuneBtn").hidden = !on;
+  $("wBadge").hidden = !(on && S.weights && !isDefaultW(S.weights));
+  if (!on && !$("tunePanel").hidden) closeTune();
+}
+function buildTune() {
+  $("tuneGrid").innerHTML = WEIGHT_KEYS.map((k) => {
+    const [lo, hi] = WEIGHT_RANGE[k];
+    return `<div class="tune-row"><div class="tr-top"><label for="w-${k}">${esc(WEIGHT_UI[k][0])}</label><output id="wv-${k}" for="w-${k}"></output></div>
+      <input type="range" id="w-${k}" data-wk="${k}" min="${lo}" max="${hi}" step="${WEIGHT_STEP}" aria-describedby="wh-${k}">
+      <span class="whint" id="wh-${k}"></span></div>`;
+  }).join("");
+}
+function fillSliders() {
+  const w = liveWeights();
+  for (const k of WEIGHT_KEYS) {
+    const el = $("w-" + k);
+    el.value = w[k];
+    el.setAttribute("aria-valuetext", fmtW(w[k]));
+    $("wv-" + k).textContent = fmtW(w[k]);
+    $("wh-" + k).textContent = weightHint(k, w[k]);
+  }
+}
+function openTune() {
+  if (!$("tuneGrid").firstChild) buildTune();
+  S.wDraft = { ...liveWeights() };
+  $("tuneMsg").textContent = "";
+  fillSliders();
+  $("tunePanel").hidden = false;
+  $("tuneBtn").setAttribute("aria-expanded", "true");
+  $("w-" + WEIGHT_KEYS[0]).focus();
+}
+function closeTune() {
+  $("tunePanel").hidden = true;
+  $("tuneBtn").setAttribute("aria-expanded", "false");
+}
+function cancelTune() {
+  const hadFocus = $("tunePanel").contains(document.activeElement);
+  S.wDraft = null;
+  closeTune();
+  render();
+  if (hadFocus && !$("tuneBtn").hidden) $("tuneBtn").focus();
+}
+let tuneFrame = 0;
+function schedulePicks() {
+  if (tuneFrame) return;
+  tuneFrame = requestAnimationFrame(() => { tuneFrame = 0; renderPicks(); });
+}
+// While a Save is in flight the sliders and Reset are locked, so a move can't be lost to the older draft being saved.
+function setTuneBusy(busy) {
+  $("tuneSave").disabled = busy;
+  $("tuneReset").disabled = busy;
+  for (const el of $("tuneGrid").querySelectorAll("input")) el.disabled = busy;
+}
+async function savePrefs() {
+  if (!S.wDraft) return;
+  setTuneBusy(true);
+  $("tuneMsg").textContent = "Saving...";
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (S.prefsEtag) headers["If-Match"] = S.prefsEtag;
+    const r = await fetch(API("api/prefs"), { method: "PUT", headers, body: JSON.stringify({ weights: S.wDraft }) });
+    if (r.status === 412) {
+      await loadPrefs();
+      if (S.prefsOn) { S.wDraft = { ...S.weights }; fillSliders(); }
+      $("tuneMsg").textContent = "The weights changed in another window; reloaded them.";
+      render();
+      return;
+    }
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const b = await r.json();
+    S.weights = Object.fromEntries(WEIGHT_KEYS.map((k) => [k, b.weights[k]]));
+    S.prefsEtag = r.headers.get("ETag") || S.prefsEtag;
+    S.wDraft = null;
+    $("tuneMsg").textContent = "";
+    closeTune();
+    render();
+    $("tuneBtn").focus();
+  } catch (e) {
+    $("tuneMsg").textContent = "Couldn't save the weights. Your changes are kept; try again in a moment.";
+  } finally { setTuneBusy(false); }
+}
+$("tuneBtn").addEventListener("click", () => { if ($("tunePanel").hidden) openTune(); else cancelTune(); });
+$("tuneSave").addEventListener("click", savePrefs);
+$("tuneCancel").addEventListener("click", cancelTune);
+$("tuneReset").addEventListener("click", () => {
+  S.wDraft = { ...DEFAULT_W };
+  $("tuneMsg").textContent = "";
+  fillSliders();
+  schedulePicks();
+});
+$("tuneGrid").addEventListener("input", (e) => {
+  const k = e.target.dataset && e.target.dataset.wk;
+  if (!k || !S.wDraft) return;
+  S.wDraft = { ...S.wDraft, [k]: Number(e.target.value) };
+  const v = S.wDraft[k];
+  e.target.setAttribute("aria-valuetext", fmtW(v));
+  $("wv-" + k).textContent = fmtW(v);
+  $("wh-" + k).textContent = weightHint(k, v);
+  schedulePicks();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("tunePanel").hidden) { e.preventDefault(); cancelTune(); }
+});
 
 // ---------------------------------------------------------------- refresh library (API 2)
 // Asks the server to re-run the exporter (POST api/export), follows api/export/status, and loads the new

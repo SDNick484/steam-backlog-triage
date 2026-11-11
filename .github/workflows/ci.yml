@@ -64,7 +64,9 @@ jobs:
             tests.test_access_jwt \
             tests.test_ask \
             tests.test_hardening \
-            tests.test_history 2>&1 | tee unittest.log
+            tests.test_history \
+            tests.test_weights \
+            tests.test_prefs 2>&1 | tee unittest.log
       - name: Fail if any test was skipped
         shell: bash
         run: |
@@ -99,7 +101,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python -m unittest -v tests.browser.test_page tests.browser.test_filters tests.browser.test_stats_page tests.browser.test_ask_page tests.browser.test_health_banner 2>&1 | tee page.log
+          python -m unittest -v tests.browser.test_page tests.browser.test_filters tests.browser.test_stats_page tests.browser.test_ask_page tests.browser.test_health_banner tests.browser.test_weights_page 2>&1 | tee page.log
           if grep -Ei '\.\.\. skipped|skipped=' page.log; then echo "::error::a test was skipped"; exit 1; fi
 
   # install/alpine.sh twice (and a third time with one option changed) inside python:3.12-alpine, with apk, rc-*,

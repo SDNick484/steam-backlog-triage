@@ -8,7 +8,8 @@ JavaScript under node and compares.
 Started from mcp-server-steam-backlog ee288ba (src/steam_backlog_mcp/domain.py, lookup.py).
 
   normalize()           the page's normalizeGame() + annotateNames()
-  play_state(), score() the couch score, term by term (score_breakdown)
+  play_state(), score() the couch score, term by term (score_breakdown), each term scaled by a weight
+  check_weights(), clean_weights()  the weights' validators (strict for a save, tolerant for a read)
   Filters, clean()      the filter panel (DEFAULT_F) and its validator
   passes(), selected()  the page's passes() and selected()
   find(), picks()       the list (with relaxation) and the couch picks
@@ -22,6 +23,7 @@ from __future__ import annotations
 import difflib
 import math
 import time
+import types
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -418,6 +420,71 @@ def is_unknown(g: Game, k: str) -> bool:
     return False
 
 
+# --------------------------------------------------------------------------- score weights
+# One multiplier per score term; 1 leaves the term as the page has always scored it, 0 switches it off.
+WEIGHT_KEYS = ("play", "deck", "length", "metacritic", "deck_played", "controller", "next")
+WEIGHT_RANGE: dict[str, tuple[float, float]] = {k: (0, 3) for k in WEIGHT_KEYS} | {"next": (0.5, 2)}
+WEIGHT_STEP = 0.25
+Weights = Mapping[str, float]
+DEFAULT_WEIGHTS: Weights = types.MappingProxyType({k: 1 for k in WEIGHT_KEYS})
+
+
+def _weight_problem(key: str, v: Any) -> str | None:
+    """Why ``v`` is not a usable weight for ``key``, or None."""
+    if type(v) not in (int, float):  # excludes bool
+        return "not a number"
+    try:
+        finite = math.isfinite(v)
+    except OverflowError:  # an int too large for a float
+        finite = False
+    if not finite:
+        return "not a finite number"
+    lo, hi = WEIGHT_RANGE[key]
+    if not lo <= v <= hi:
+        return f"out of range ({lo:g} to {hi:g})"
+    if not float(v * 4).is_integer():
+        return f"not a multiple of {WEIGHT_STEP:g}"
+    return None
+
+
+def check_weights(raw: Any) -> dict[str, float]:
+    """Strict, for a save: all seven weights, absent keys at 1. Anything else wrong raises QueryError."""
+    if not isinstance(raw, dict):
+        raise QueryError("weights must be an object keyed by term")
+    for k in raw:
+        if k not in WEIGHT_RANGE:
+            raise QueryError(f"unknown weight key; allowed: {', '.join(WEIGHT_KEYS)}")
+    out: dict[str, float] = {}
+    for k in WEIGHT_KEYS:
+        v = raw.get(k, 1)
+        why = _weight_problem(k, v)
+        if why:
+            raise QueryError(f"weight {k}: {why}")
+        out[k] = v + 0.0 if isinstance(v, float) else v  # -0.0 becomes 0.0
+    return out
+
+
+def clean_weights(raw: Any) -> tuple[dict[str, float], list[str]]:
+    """Tolerant, for reading the file: all seven weights, a bad or missing one at 1, plus one short
+    problem per thing fixed."""
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_WEIGHTS), ([] if raw is None else ["weights: not an object"])
+    problems = ["unknown weight key" for k in raw if k not in WEIGHT_RANGE]
+    out: dict[str, float] = {}
+    for k in WEIGHT_KEYS:
+        v = raw.get(k, 1)
+        why = _weight_problem(k, v)
+        if why:
+            problems.append(f"{k}: {why.split(' (')[0]}")
+            v = 1
+        out[k] = v + 0.0 if isinstance(v, float) else v
+    return out, problems
+
+
+def is_default_weights(w: Weights) -> bool:
+    return all(w.get(k, 1) == 1 for k in WEIGHT_KEYS)
+
+
 # --------------------------------------------------------------------------- score
 @dataclass(frozen=True)
 class Term:
@@ -426,36 +493,37 @@ class Term:
     points: float
 
 
-def score_breakdown(g: Game, lane: str) -> list[Term]:
-    """score() term by term; the points add up to score() exactly. Zero terms are left out (play stays)."""
+def score_breakdown(g: Game, lane: str, *, weights: Weights) -> list[Term]:
+    """score() term by term; the points add up to score() exactly. Each term is its base points times its
+    weight; zero terms are left out (play stays)."""
     out: list[Term] = []
+
+    def add(key: str, label: str, base: float, *, keep: bool = False) -> None:
+        pts = base * weights[key] + 0.0  # + 0.0 turns -0.0 into 0.0
+        if pts or keep:
+            out.append(Term(key, label, pts))
+
     st = play_state(g)
     labels = {"never": "never played", "tried": "tried (under 2 h)", "played": "played 2 h+"}
-    out.append(Term("play", labels[st], {"never": 30, "tried": 22, "played": -20}[st]))
-    deck_pts = {3: 30, 2: 14, 0: 0, 1: -45}[g.deck]
-    if deck_pts:
-        out.append(Term("deck", DECK_LABEL[g.deck], deck_pts))
+    add("play", labels[st], {"never": 30, "tried": 22, "played": -20}[st], keep=True)
+    add("deck", DECK_LABEL[g.deck], {3: 30, 2: 14, 0: 0, 1: -45}[g.deck])
     h = length_hours(g)
     if h:
-        pts = 24 if h <= 5 else 18 if h <= 12 else 9 if h <= 25 else 0 if h <= 50 else -10
-        if pts:
-            out.append(Term("length", f"{h:g} h", pts))
+        add("length", f"{h:g} h", 24 if h <= 5 else 18 if h <= 12 else 9 if h <= 25 else 0 if h <= 50 else -10)
     if g.metacritic:
-        mc_pts = (g.metacritic - 75) / 2
-        if mc_pts:
-            out.append(Term("metacritic", f"MC {g.metacritic:g}", mc_pts))
+        add("metacritic", f"MC {g.metacritic:g}", (g.metacritic - 75) / 2)
     if g.deck_playtime > 0:
-        out.append(Term("deck_played", "played on the Deck", 5))
+        add("deck_played", "played on the Deck", 5)
     if g.controller == "full":
-        out.append(Term("controller", "full controller support", 4))
+        add("controller", "full controller support", 4)
     if lane == "next":
-        out.append(Term("next", "in Up next", 100))
+        add("next", "in Up next", 100)
     return out
 
 
-def score(g: Game, lane: str) -> float:
+def score(g: Game, lane: str, *, weights: Weights) -> float:
     total = 0.0
-    for t in score_breakdown(g, lane):
+    for t in score_breakdown(g, lane, weights=weights):
         total += t.points
     return total
 
@@ -748,7 +816,7 @@ def _name_sort(g: Game) -> tuple[str, str]:
     return (g.name.casefold(), g.name)
 
 
-def sort_games(games: list[Game], sort: str, triage: Mapping[int, str]) -> list[Game]:
+def sort_games(games: list[Game], sort: str, triage: Mapping[int, str], *, weights: Weights) -> list[Game]:
     """The page's list sort; every comparison falls back to the name."""
     key: Callable[[Game], Any]
     if sort == "short":
@@ -764,7 +832,7 @@ def sort_games(games: list[Game], sort: str, triage: Mapping[int, str]) -> list[
     elif sort == "deckplay":
         key = lambda g: (-g.deck_playtime, _name_sort(g))  # noqa: E731
     else:
-        key = lambda g: (-score(g, lane_of(g, triage)), _name_sort(g))  # noqa: E731
+        key = lambda g: (-score(g, lane_of(g, triage), weights=weights), _name_sort(g))  # noqa: E731
     return sorted(games, key=key)
 
 
@@ -777,12 +845,12 @@ class FindResult:
 
 
 def find(games: Sequence[Game], f: Filters, triage: Mapping[int, str], notes: Mapping[int, str],
-         *, sort: str = "score", relax: bool = True) -> FindResult:
+         *, sort: str = "score", relax: bool = True, weights: Weights) -> FindResult:
     """Filter and sort. With nothing found and ``relax``: a fuzzy name first, then drop filters weakest
     first until something matches, and say what was dropped. ``f.view`` is applied and never relaxed."""
     hits = selected(games, f, triage, notes)
     if hits or not relax:
-        return FindResult(sort_games(hits, sort, triage))
+        return FindResult(sort_games(hits, sort, triage, weights=weights))
     if f.query.strip():
         pool = selected(games, f.without("query"), triage, notes)
         close = suggest(f.query, [g.name for g in pool], limit=10)
@@ -798,23 +866,24 @@ def find(games: Sequence[Game], f: Filters, triage: Mapping[int, str], notes: Ma
         relaxed.append(name)
         hits = selected(games, current, triage, notes)
         if hits:
-            return FindResult(sort_games(hits, sort, triage), exact=False, relaxed=relaxed)
+            return FindResult(sort_games(hits, sort, triage, weights=weights), exact=False, relaxed=relaxed)
     return FindResult([], exact=False, relaxed=relaxed)
 
 
 def picks(games: Sequence[Game], f: Filters, triage: Mapping[int, str], notes: Mapping[int, str],
-          *, exclude_next: bool = False) -> list[Game]:
+          *, exclude_next: bool = False, weights: Weights) -> list[Game]:
     """renderPicks(): backlog games passing the filters, by score, ties in export order."""
     pool = [g for g in selected(games, replace(f, view="backlog"), triage, notes)
             if not (exclude_next and lane_of(g, triage) == "next")]
-    return sorted(pool, key=lambda g: (-score(g, lane_of(g, triage)), g.export_index))
+    return sorted(pool, key=lambda g: (-score(g, lane_of(g, triage), weights=weights), g.export_index))
 
 
-def next_queue(games: Sequence[Game], triage: Mapping[int, str], order: Sequence[int]) -> list[Game]:
+def next_queue(games: Sequence[Game], triage: Mapping[int, str], order: Sequence[int],
+               *, weights: Weights) -> list[Game]:
     """nextIds(): the Up next lane in saved order, then unordered ones by score, then name."""
     index = {a: i for i, a in enumerate(order)}
     lane = [g for g in games if lane_of(g, triage) == "next"]
-    return sorted(lane, key=lambda g: (index.get(g.appid, 10**9), -score(g, "next"), _name_sort(g)))
+    return sorted(lane, key=lambda g: (index.get(g.appid, 10**9), -score(g, "next", weights=weights), _name_sort(g)))
 
 
 # --------------------------------------------------------------------------- overview
@@ -1178,6 +1247,8 @@ class Snapshot:
     notes: dict[int, str] = field(default_factory=dict)
     order: list[int] = field(default_factory=list)
     exported_at: str | None = None
+    # Defaulted only because Snapshot is built positionally (tests, the MCP's domain.stats); every scoring path must pass real weights.
+    weights: Weights = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
 
 
 def _bad(name: str, allowed: Any, got: Any = None) -> QueryError:
@@ -1308,8 +1379,8 @@ def _int(v: float | None) -> int | None:
     return int(v) if v is not None else None
 
 
-def _terms(g: Game, lane: str) -> list[dict[str, Any]]:
-    return [{"term": t.term, "label": t.label, "points": t.points} for t in score_breakdown(g, lane)]
+def _terms(g: Game, lane: str, weights: Weights) -> list[dict[str, Any]]:
+    return [{"term": t.term, "label": t.label, "points": t.points} for t in score_breakdown(g, lane, weights=weights)]
 
 
 def _row(g: Game, snap: Snapshot) -> dict[str, Any]:
@@ -1319,7 +1390,7 @@ def _row(g: Game, snap: Snapshot) -> dict[str, Any]:
         "play_state": play_state(g), "playtime_hours": _hours(g.playtime), "length_hours": length_hours(g),
         "metacritic": _int(g.metacritic) if g.metacritic else None,
         "protondb": g.proton.tier if g.proton else None,
-        "lane": lane if lane in LANES else None, "has_note": g.appid in snap.notes, "score": score(g, lane),
+        "lane": lane if lane in LANES else None, "has_note": g.appid in snap.notes, "score": score(g, lane, weights=snap.weights),
     }
 
 
@@ -1327,7 +1398,7 @@ def _detail(g: Game, snap: Snapshot) -> dict[str, Any]:
     lane = lane_of(g, snap.triage)
     controller = g.controller if g.controller in ("full", "partial") else "none" if g.has_details else None
     last = datetime.fromtimestamp(g.last_played, UTC).date().isoformat() if g.last_played else None
-    queue = [x.appid for x in next_queue(snap.games, snap.triage, snap.order)]
+    queue = [x.appid for x in next_queue(snap.games, snap.triage, snap.order, weights=snap.weights)]
     return {
         **_row(g, snap),
         "deck_playtime_hours": _hours(g.deck_playtime),
@@ -1341,7 +1412,8 @@ def _detail(g: Game, snap: Snapshot) -> dict[str, Any]:
         "note": snap.notes.get(g.appid),
         "next_position": queue.index(g.appid) + 1 if g.appid in queue else None,
         "in_backlog": in_backlog(g, snap.triage),
-        "score_breakdown": _terms(g, lane), "score_explained": explain(score_breakdown(g, lane)),
+        "score_breakdown": _terms(g, lane, snap.weights),
+        "score_explained": explain(score_breakdown(g, lane, weights=snap.weights)),
         "store_url": STORE_URL.format(appid=g.appid),
     }
 
@@ -1364,6 +1436,7 @@ def overview_out(snap: Snapshot, *, now: datetime | None = None) -> dict[str, An
         "games": o.total, "play_states": o.play_states, "deck": o.deck, "backlog": o.backlog, "grid": o.grid,
         "lanes": o.lanes, "next_queue": o.lanes["next"], "coverage": o.coverage,
         "export": {"exported_at": snap.exported_at, "age_days": _age_days(snap.exported_at, now)},
+        "score_weights": dict(snap.weights), "score_weights_default": is_default_weights(snap.weights),
     }
 
 
@@ -1383,7 +1456,7 @@ def find_out(snap: Snapshot, filters: Filters, *, view: str = "all", sort: str =
     _enum("sort", sort, SORTS)
     limit = max(1, min(25, int(limit)))
     offset = max(0, int(offset))
-    res = find(snap.games, replace(filters, view=view), snap.triage, snap.notes, sort=sort)
+    res = find(snap.games, replace(filters, view=view), snap.triage, snap.notes, sort=sort, weights=snap.weights)
     page = res.games[offset:offset + limit]
     return {
         "matches": len(res.games), "offset": offset, "games": [_row(g, snap) for g in page],
@@ -1405,14 +1478,14 @@ def game_out(snap: Snapshot, *, game: str) -> dict[str, Any]:
 
 def picks_out(snap: Snapshot, filters: Filters, *, count: int = 6, exclude_next: bool = False) -> dict[str, Any]:
     count = max(1, min(12, int(count)))
-    res = find(snap.games, replace(filters, view="backlog"), snap.triage, snap.notes)
+    res = find(snap.games, replace(filters, view="backlog"), snap.triage, snap.notes, weights=snap.weights)
     pool = [g for g in res.games if not (exclude_next and lane_of(g, snap.triage) == "next")]
-    pool.sort(key=lambda g: (-score(g, lane_of(g, snap.triage)), g.export_index))
+    pool.sort(key=lambda g: (-score(g, lane_of(g, snap.triage), weights=snap.weights), g.export_index))
     out = []
     for i, g in enumerate(pool[:count], 1):
         lane = lane_of(g, snap.triage)
-        out.append({**_row(g, snap), "rank": i, "score_breakdown": _terms(g, lane),
-                    "score_explained": explain(score_breakdown(g, lane)), "note": snap.notes.get(g.appid)})
+        out.append({**_row(g, snap), "rank": i, "score_breakdown": _terms(g, lane, snap.weights),
+                    "score_explained": explain(score_breakdown(g, lane, weights=snap.weights)), "note": snap.notes.get(g.appid)})
     return {
         "picks": out, "considered": len(pool), "exact": res.exact, "relaxed": res.relaxed,
         "detail": f"{len(pool)} backlog games passed; top {len(out)} by couch score."
@@ -1421,7 +1494,7 @@ def picks_out(snap: Snapshot, filters: Filters, *, count: int = 6, exclude_next:
 
 
 def next_queue_out(snap: Snapshot) -> dict[str, Any]:
-    q = next_queue(snap.games, snap.triage, snap.order)
+    q = next_queue(snap.games, snap.triage, snap.order, weights=snap.weights)
     return {"queue": [{**_row(g, snap), "position": i, "note": snap.notes.get(g.appid)} for i, g in enumerate(q, 1)],
             "detail": f"{len(q)} games in Up next, in queue order."}
 

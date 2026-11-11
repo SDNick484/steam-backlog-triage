@@ -13,6 +13,8 @@ Standard library only. Serves:
   GET  /api/notes       {appid: note} for per-game notes
   PUT  /api/notes       {"appid": 620, "note": "..."}  ("" clears; max 2000 characters)
   GET  /api/order       [appid, ...] order of the Up next lane
+  GET  /api/prefs       {"weights": {...}, "default": bool}: the couch-score weights (prefs.json)
+  PUT  /api/prefs       {"weights": {"deck": 1.5}}  (body required; absent keys reset to 1, {"weights": {}} resets all; max 4 KB)
   GET  /api/history     {"days": [...], "lanes": [...]}: one row of counts per day (history.jsonl) and every
                         lane change (lane_log.jsonl), oldest first; read-only, the server writes both files
   PUT  /api/order       {"order": [620, 1145360, ...]}  (a list of distinct app ids)
@@ -26,14 +28,14 @@ Standard library only. Serves:
   GET  /healthz?deep=1  200 or 503 and {"ok", "build", "last_ok", "age_seconds", "consecutive_failures"}:
                         unhealthy when the last export failed or the last success is over 10 days old
 
-Notes and order live in notes.json and order.json next to triage.json. History lives beside them:
+Notes, order and the score weights live in notes.json, order.json and prefs.json next to triage.json. History lives beside them:
 lane_log.jsonl gets one line for every lane change that reaches the server (the page's or anyone else's),
 and history.jsonl one row per local day, written after a lane change and after a new library appears.
 
 Every response carries X-Backlog-Server: 1 and X-Backlog-Api: 2 (the API version), plus
 X-Content-Type-Options: nosniff, Referrer-Policy: same-origin and Content-Security-Policy: frame-ancestors
 'none'. PUT, POST and DELETE answer 403 to a request the browser marks as cross-site. GET
-/api/library, /api/triage, /api/notes, /api/order and /api/history send an ETag and honor If-None-Match,
+/api/library, /api/triage, /api/notes, /api/order, /api/prefs and /api/history send an ETag and honor If-None-Match,
 answering 304 when it still matches. Their PUTs honor an optional If-Match (412 if the
 resource changed since that ETag) and return the previous value; with no If-Match they
 behave as they always did.
@@ -84,6 +86,7 @@ from access_jwt import Verifier
 API_VERSION = "2"
 LANES = {"", "next", "someday", "skip", "done"}
 MAX_BODY = 32 * 1024 * 1024
+PREFS_MAX_BODY = 4096  # a weights object is under 200 bytes
 NOTE_MAX = 2000
 ORDER_MAX = 5000
 POST_MAX = 64 * 1024            # POST /api/export takes no real body; anything bigger is a mistake
@@ -290,6 +293,7 @@ class App:
         self.triage = os.path.join(data_dir, "triage.json")
         self.notes = os.path.join(data_dir, "notes.json")
         self.order = os.path.join(data_dir, "order.json")
+        self.prefs = os.path.join(data_dir, "prefs.json")
         self.head = SKELETON_HEAD.replace("{config}", config_script({"nav": nav}))
         self.lock = threading.Lock()
         self.history = History(self.data_dir, now)
@@ -367,6 +371,7 @@ class App:
             exported = self._ask_games[2] if self._ask_games else None
         with self.lock:
             triage, notes, order = self.read_triage(), self.read_notes(), self.read_order()
+            weights = self.load_weights()
         ids = lambda m: {int(k): v for k, v in (m.items() if isinstance(m, dict) else ())
                          if isinstance(k, str) and k.isascii() and k.isdigit() and isinstance(v, str) and v}
         return backlog_query.Snapshot(
@@ -374,7 +379,7 @@ class App:
             triage={k: v for k, v in ids(triage).items() if v in LANES},
             notes=ids(notes),
             order=[a for a in order if is_app_id(a)] if isinstance(order, list) else [],
-            exported_at=exported)
+            exported_at=exported, weights=weights)
 
     def record_history(self) -> None:
         """Write today's history row from the library and the triage as they are now. Call with self.lock held:
@@ -422,6 +427,31 @@ class App:
 
     def read_triage(self) -> dict:
         return read_json(self.triage, {})
+
+    def load_weights(self) -> dict[str, float]:
+        """The saved couch-score weights, all seven keys. Call with self.lock held. A missing prefs.json is
+        the defaults, silently; a file that can't be read or isn't an object is the defaults with one log
+        line; a bad key falls back to 1 on its own. The log line names what was wrong, never a value."""
+        try:
+            with open(self.prefs, encoding="utf-8") as f:
+                raw = json.load(f)
+        except FileNotFoundError:
+            return dict(backlog_query.DEFAULT_WEIGHTS)
+        except (OSError, ValueError, RecursionError):
+            sys.stderr.write("prefs: prefs.json could not be read as JSON, using the default weights\n")
+            return dict(backlog_query.DEFAULT_WEIGHTS)
+        if not isinstance(raw, dict):
+            sys.stderr.write("prefs: prefs.json is not a JSON object, using the default weights\n")
+            return dict(backlog_query.DEFAULT_WEIGHTS)
+        weights, problems = backlog_query.clean_weights(raw.get("weights"))
+        if problems:
+            sys.stderr.write(f"prefs: prefs.json: {'; '.join(problems)}; using the default for those\n")
+        return weights
+
+    def read_prefs(self) -> dict:
+        """The GET /api/prefs body. Call with self.lock held."""
+        weights = self.load_weights()
+        return {"weights": weights, "default": backlog_query.is_default_weights(weights)}
 
     def read_notes(self) -> dict:
         return read_json(self.notes, {})
@@ -916,6 +946,8 @@ def make_handler(app: App):
                 return self.small_resource(app.read_notes)
             if path == "/api/order":
                 return self.small_resource(app.read_order)
+            if path == "/api/prefs":
+                return self.small_resource(app.read_prefs)
             if path == "/api/history":
                 return self.small_resource(app.read_history)
             if path == "/api/export/status":
@@ -938,10 +970,43 @@ def make_handler(app: App):
                 return
             self.send_error(501, "Unsupported method ('DELETE')")
 
+        def put_prefs(self) -> None:
+            """PUT /api/prefs. The size cap is checked before the body is read."""
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = 0
+            if n <= 0 or n > PREFS_MAX_BODY:
+                self.drain_body()
+                return self.json(400, {"error": f"expected a JSON body of at most {PREFS_MAX_BODY} bytes"})
+            try:
+                data = json.loads(self.rfile.read(n))
+            except (ValueError, RecursionError):
+                return self.json(400, {"error": "body is not valid JSON"})
+            if not isinstance(data, dict) or set(data) != {"weights"}:
+                return self.json(400, {"error": 'expected {"weights": {...}} and nothing else'})
+            try:
+                stored = backlog_query.check_weights(data["weights"])
+            except backlog_query.QueryError as e:
+                return self.json(400, {"error": str(e)})
+            with app.lock:
+                current = etag_of(dump(app.read_prefs()))
+                stale = not self.if_match_ok(current)
+                if not stale:
+                    previous = app.load_weights()
+                    atomic_write(app.prefs, json.dumps({"version": 1, "weights": stored},
+                                                       separators=(",", ":")).encode())
+                    new_etag = etag_of(dump(app.read_prefs()))
+            if stale:
+                return self.precondition_failed(current)
+            return self.json(200, {"ok": True, "weights": stored, "previous": previous}, headers={"ETag": new_etag})
+
         def do_PUT(self):
             path = self.path.split("?", 1)[0]
             if self.refuse_cross_site():
                 return
+            if path == "/api/prefs":
+                return self.put_prefs()
             try:
                 data = self.body()
             except (ValueError, json.JSONDecodeError) as e:

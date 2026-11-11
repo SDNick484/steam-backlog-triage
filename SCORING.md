@@ -47,13 +47,38 @@ of `1e-9`.
 **Example.** Outer Wilds, never played, Deck Verified, 17 h main story, Metacritic 85:
 never played +30, Verified +30, 17 h +9, Metacritic +5 = **74**.
 
+## 3a. Weights
+
+Each term's points are multiplied by a weight before they are summed, so
+`score = Σ base_points(term) × weight(term)`. The all-1 default reproduces section 3 exactly.
+
+| Key | Range | Default |
+|---|---|---|
+| `play`, `deck`, `length`, `metacritic`, `deck_played`, `controller` | 0 – 3 | 1 |
+| `next` | 0.5 – 2 | 1 |
+
+Weights move in steps of **0.25** (`WEIGHT_STEP`), so every allowed weight is a dyadic rational. They
+are stored in `prefs.json`, which the server owns; the page and the Python mirror (`backlog_query.py`)
+both take them as input and never persist them. A term whose weighted points are zero is left out of
+the breakdown (`play` always stays), and `base × weight + 0` turns a `-0` into `0`.
+
+Exactness: base points are small integers or halves (`(metacritic − 75) / 2`), and weights are multiples
+of 0.25, so each product is exactly representable in IEEE-754 doubles and both implementations compute
+bit-identical terms. Every weighted term is therefore a multiple of 1/8 (a half-point base times a
+quarter-step weight) and the sums stay small, far below 2^50, so each partial sum is exact too: the
+total does not depend on the order of the terms, and rank ties break the same way in JS and Python. The
+design relies on that. The `1e-9` tolerance in the vector checks is kept only from the older unweighted
+vectors; the order of terms is still fixed.
+
 ## 4. Ranking
 
 - **Couch picks** (page: `renderPicks`): games in the backlog that pass the active filters,
   sorted by score descending; ties keep **export order** (the page's sort is stable, and the
   exporter writes games sorted by lower-cased name). Top 6.
 - **List sort "score":** score descending, ties by name (`localeCompare`).
-- The `next` bonus makes Up-next games rank first **in practice, not by rule**. The highest
+- The `next` bonus makes Up-next games rank first **in practice, not by rule**. The figures below are
+  for the default weights; with custom weights the bonus can be as low as +50 (`next` 0.5), and the
+  highest score without it reaches 316.5 at the ceiling set. The highest
   score without it is 30 + 30 + 24 + 12.5 + 5 + 4 = 105.5 (never played, Verified, ≤ 5 h,
   Metacritic 100, played on the Deck, full controller). The lowest Up-next game still in the
   backlog is 22 − 45 − 10 + (MC − 75)/2 + 100, which is 67 at Metacritic 75. So a weak Up-next
@@ -73,8 +98,15 @@ These use different boundaries from the score's length bands:
 ## 6. Parity vectors
 
 `tests/score_vectors.json` holds 33 export-shaped games with a lane each and the expected
-`score`, `playState` and `lengthHours` (`L`). It is generated from the page's own `normalize()`
-and `score()` by `scripts/gen_score_vectors.mjs` in
-[mcp-server-steam-backlog](https://github.com/SDNick484/mcp-server-steam-backlog), and both repos
-keep a byte-identical copy. `tests/test_score_vectors.py` checks the page against it (it needs
-`node` and skips without it). When `score()` changes, regenerate the vectors and update both repos.
+`score`, `playState` and `lengthHours` (`L`) under the default weights (`vectors`), plus `weightSets`:
+four named weight sets (`default`, `mixed`, `floor`, `ceiling`), each with every vector's `score`,
+its `terms` as `[key, points]` pairs, and `rank` (all vector ids by score descending, ties by id
+ascending). The file is generated from the page's own `normalize()`, `scoreTerms()` and `score()` by
+`tests/gen_score_vectors.mjs` in this repo (copied from mcp-server-steam-backlog `bd9202a`). The MCP
+repo keeps a byte-identical copy of the JSON. `tests/test_score_vectors.py` checks the page against it
+and `tests/test_backlog_query.py` checks `backlog_query.py` (the page test needs `node` and skips without
+it unless `REQUIRE_NODE=1`). When the scoring code changes, regenerate with
+
+    node tests/gen_score_vectors.mjs backlog.html tests/score_vectors.json --source-ref "$(git rev-parse --short HEAD)"
+
+and update the MCP repo's copy.

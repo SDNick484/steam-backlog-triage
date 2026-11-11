@@ -145,14 +145,14 @@ def by_name(gs, name):
 
 class PortedDomain(unittest.TestCase):
     def find(self, f, triage=None, notes=None, **kw):
-        return q.find(lib(), q.Filters(view="all", **f) if isinstance(f, dict) else f, triage or {}, notes or {}, **kw)
+        return q.find(lib(), q.Filters(view="all", **f) if isinstance(f, dict) else f, triage or {}, notes or {}, **{"weights": q.DEFAULT_WEIGHTS, **kw})
 
     def test_explain_reads_like_the_design_doc(self):
         g = q.normalize(raw(deck=3, hltb={"main": 8, "extra": 13, "complete": 22}, metacritic=86))
-        self.assertEqual(q.explain(q.score_breakdown(g, "")), "never played +30, Verified +30, 8 h +18, MC 86 +5.5")
+        self.assertEqual(q.explain(q.score_breakdown(g, "", weights=q.DEFAULT_WEIGHTS)), "never played +30, Verified +30, 8 h +18, MC 86 +5.5")
 
     def test_vectors_cover_every_term(self):
-        seen = {t.term for v in VECTORS["vectors"] for t in q.score_breakdown(q.normalize(v["game"]), v["lane"])}
+        seen = {t.term for v in VECTORS["vectors"] for t in q.score_breakdown(q.normalize(v["game"]), v["lane"], weights=q.DEFAULT_WEIGHTS)}
         self.assertEqual(seen, {"play", "deck", "length", "metacritic", "deck_played", "controller", "next"})
 
     def test_normalize_matches_the_page(self):
@@ -261,27 +261,27 @@ class PortedDomain(unittest.TestCase):
 
     def test_picks_rank_like_the_page(self):
         gs = lib()
-        top = q.picks(gs, q.Filters(), {}, {})
-        scores = [q.score(g, "") for g in top]
+        top = q.picks(gs, q.Filters(), {}, {}, weights=q.DEFAULT_WEIGHTS)
+        scores = [q.score(g, "", weights=q.DEFAULT_WEIGHTS) for g in top]
         self.assertEqual(scores, sorted(scores, reverse=True))
         self.assertTrue(all(q.in_backlog(g, {}) for g in top))
         for a, b in zip(top, top[1:]):
-            if q.score(a, "") == q.score(b, ""):
+            if q.score(a, "", weights=q.DEFAULT_WEIGHTS) == q.score(b, "", weights=q.DEFAULT_WEIGHTS):
                 self.assertLess(a.export_index, b.export_index)
 
     def test_next_bonus_does_not_force_first(self):
         gs = lib()
         tri = {1085660: "next"}  # Destiny 2: tried, Unsupported on the Deck: 22 - 45 + 4 + 100 - 6.5 (MC 82)
-        top = q.picks(gs, q.Filters(), tri, {})
-        self.assertEqual(q.score(by_name(gs, "Destiny 2"), "next"), 22 - 45 + 3.5 + 4 + 100)
+        top = q.picks(gs, q.Filters(), tri, {}, weights=q.DEFAULT_WEIGHTS)
+        self.assertEqual(q.score(by_name(gs, "Destiny 2"), "next", weights=q.DEFAULT_WEIGHTS), 22 - 45 + 3.5 + 4 + 100)
         self.assertEqual(top[0].name, "Portal")
         self.assertGreater([g.name for g in top].index("Destiny 2"), 0)
-        self.assertNotIn("Destiny 2", {g.name for g in q.picks(gs, q.Filters(), tri, {}, exclude_next=True)})
+        self.assertNotIn("Destiny 2", {g.name for g in q.picks(gs, q.Filters(), tri, {}, exclude_next=True, weights=q.DEFAULT_WEIGHTS)})
 
     def test_next_queue(self):
         gs = lib()
         tri = {620: "next", 400: "next", 753640: "next"}
-        ids = [g.appid for g in q.next_queue(gs, tri, [753640])]
+        ids = [g.appid for g in q.next_queue(gs, tri, [753640], weights=q.DEFAULT_WEIGHTS)]
         self.assertEqual(ids[0], 753640)
         self.assertEqual(set(ids), {620, 400, 753640})
 
@@ -316,12 +316,28 @@ class ScoreVectors(unittest.TestCase):
             with self.subTest(vector=v["id"], why=v["why"]):
                 g = q.normalize(v["game"])
                 exp = v["expected"]
-                self.assertAlmostEqual(q.score(g, v["lane"]), exp["score"], delta=1e-9)
+                self.assertAlmostEqual(q.score(g, v["lane"], weights=q.DEFAULT_WEIGHTS), exp["score"], delta=1e-9)
                 self.assertEqual(q.play_state(g), exp["playState"])
                 self.assertEqual(q.length_hours(g), exp["lengthHours"])
-                terms = q.score_breakdown(g, v["lane"])
+                terms = q.score_breakdown(g, v["lane"], weights=q.DEFAULT_WEIGHTS)
                 self.assertAlmostEqual(sum(t.points for t in terms), exp["score"], delta=1e-9)
                 self.assertTrue(all(t.points != 0 for t in terms if t.term != "play"))
+
+    def test_weight_sets(self):
+        by_id = {v["id"]: v for v in VECTORS["vectors"]}
+        for ws in VECTORS["weightSets"]:
+            scores = {}
+            for want in ws["expected"]:
+                with self.subTest(set=ws["name"], vector=want["id"]):
+                    v = by_id[want["id"]]
+                    g = q.normalize(v["game"])
+                    terms = q.score_breakdown(g, v["lane"], weights=ws["weights"])
+                    self.assertEqual([[t.term, t.points] for t in terms], want["terms"])
+                    s = q.score(g, v["lane"], weights=ws["weights"])
+                    self.assertAlmostEqual(s, want["score"], delta=1e-9)
+                    scores[want["id"]] = s
+            with self.subTest(set=ws["name"], what="rank"):
+                self.assertEqual(sorted(scores, key=lambda i: (-scores[i], i)), ws["rank"])
 
 
 # ---------------------------------------------------------------- filter parity with the page
@@ -438,7 +454,7 @@ class InProgress(unittest.TestCase):
         self.assertEqual(f.without("progress").progress, ())
         sel = q.selected(self.games, f, PROG_TRIAGE, NOTES)
         self.assertTrue(sel and all(q.in_progress(g, PROG_TRIAGE) for g in sel))
-        by_deck = [g.deck_playtime for g in q.sort_games(list(self.games), "deckplay", PROG_TRIAGE)]
+        by_deck = [g.deck_playtime for g in q.sort_games(list(self.games), "deckplay", PROG_TRIAGE, weights=q.DEFAULT_WEIGHTS)]
         self.assertEqual(by_deck, sorted(by_deck, reverse=True))
         # D6: "backlog" still means not played and not closed. A game can be in progress and not in the backlog.
         d = by_name(self.games, "Deck only")
